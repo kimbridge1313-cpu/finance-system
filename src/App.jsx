@@ -146,6 +146,7 @@ const initialUsers = [
   { id: "U3b22xxxxmarket", name: "阿美", role: "staff", department: "supermarket" },
 ];
 
+function getTodayDate() { const now = new Date(); const year = now.getFullYear(); const month = String(now.getMonth() + 1).padStart(2, "0"); const day = String(now.getDate()).padStart(2, "0"); return `${year}-${month}-${day}`; }
 function money(value) { return `$${Number(value || 0).toLocaleString()}`; }
 function plainMoney(value) { return Number(value || 0).toLocaleString(); }
 function percent(value, base) { return base ? `${((Number(value || 0) / Number(base || 1)) * 100).toFixed(2)}%` : "0%"; }
@@ -248,6 +249,7 @@ function runSelfTests(categories, departments) {
     { name: "其他支出存在", pass: getCategoryOptions(categories, "expense").some((x) => x.id === "other_expense") },
     { name: "其他收入手動輸入", pass: getItemOptions(categories, "income", "other_revenue").length === 0 },
     { name: "超市部預設部門存在", pass: departments.some((dept) => dept.value === "supermarket") },
+    { name: "今日日期格式正確", pass: /^\\d{4}-\\d{2}-\\d{2}$/.test(getTodayDate()) },
     { name: "Firebase projectId 已接入", pass: firebaseConfig.projectId === "finance-system-52d62" },
     { name: "登入 API 路徑正確", pass: AUTH_ENDPOINT === "/api/auth" },
     { name: "CSV 轉義正常", pass: buildCsvText([["a\"b"]]) === "\"a\"\"b\"" },
@@ -273,8 +275,8 @@ function DailyCash({ currentUser, isAdmin, categories, departments, dailyCashDat
   const initialDepartment = currentUser.department === "all" ? "supermarket" : currentUser.department;
   const firstExpenseCategory = getCategoryOptions(categories, "expense")[0];
   const [department, setDepartment] = useState(initialDepartment);
-  const [date, setDate] = useState("2026-05-04");
-  const [adminQueryDate, setAdminQueryDate] = useState("2026-05-04");
+  const [date, setDate] = useState(() => getTodayDate());
+  const [adminQueryDate, setAdminQueryDate] = useState(() => getTodayDate());
   const [entryType, setEntryType] = useState("expense");
   const [category, setCategory] = useState(firstExpenseCategory?.id || "");
   const [entryItem, setEntryItem] = useState(firstExpenseCategory?.items?.[0] || "");
