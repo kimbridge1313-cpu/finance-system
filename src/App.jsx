@@ -15,7 +15,7 @@ const FIREBASE_CONFIG = {
 };
 
 // 拿到 LINE Developers 的 LIFF ID 後，只改這一行。
-const LIFF_ID = "請填入_LINE_LIFF_ID";
+const LIFF_ID = "2010101193-M9eYhgFD";
 
 const app = getApps().length ? getApp() : initializeApp(FIREBASE_CONFIG);
 const auth = getAuth(app);
