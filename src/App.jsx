@@ -345,7 +345,64 @@ function VendorBills({ vendorBills, setVendorBills, vendors, departments }) {
 
 function AccountingSettings({ categories, setCategories }) { const [type, setType] = useState("expense"); const [newCategory, setNewCategory] = useState(""); const [newItems, setNewItems] = useState({}); const options = getCategoryOptions(categories, type); function addCategory() { if (!newCategory.trim()) return; setCategories((p) => ({ ...p, [type]: { ...p[type], options: [...p[type].options, { id: `cat_${Date.now()}`, label: newCategory.trim(), items: [] }] } })); setNewCategory(""); } function updateCategory(id, label) { setCategories((p) => ({ ...p, [type]: { ...p[type], options: p[type].options.map((c) => c.id === id ? { ...c, label } : c) } })); } function deleteCategory(id) { setCategories((p) => ({ ...p, [type]: { ...p[type], options: p[type].options.filter((c) => c.id !== id) } })); } function addItem(id) { const value = (newItems[id] || "").trim(); if (!value) return; setCategories((p) => ({ ...p, [type]: { ...p[type], options: p[type].options.map((c) => c.id === id ? { ...c, items: [...c.items, value] } : c) } })); setNewItems((p) => ({ ...p, [id]: "" })); } return <div className="space-y-5"><div className="grid grid-cols-2 rounded-2xl bg-gray-50 p-1"><button type="button" onClick={() => setType("expense")} className={`rounded-xl px-4 py-3 font-black ${type === "expense" ? "bg-red-500 text-white" : "text-red-500"}`}>支出分類</button><button type="button" onClick={() => setType("income")} className={`rounded-xl px-4 py-3 font-black ${type === "income" ? "bg-[#06C755] text-white" : "text-[#06C755]"}`}>收入分類</button></div><div className="grid grid-cols-[1fr_84px] gap-2"><Input value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder="新增細項分類" /><SmallButton type="button" onClick={addCategory}>新增</SmallButton></div>{options.map((cat) => <div key={cat.id} className="rounded-3xl border border-gray-100 p-4"><div className="grid grid-cols-[1fr_44px] gap-2"><Input value={cat.label} onChange={(e) => updateCategory(cat.id, e.target.value)} /><button type="button" onClick={() => deleteCategory(cat.id)} className="rounded-2xl bg-red-50 text-red-500">×</button></div><div className="mt-3 space-y-2">{cat.items.map((item, i) => <div key={i} className="grid grid-cols-[1fr_40px] gap-2"><Input value={item} onChange={(e) => setCategories((p) => ({ ...p, [type]: { ...p[type], options: p[type].options.map((c) => c.id === cat.id ? { ...c, items: c.items.map((x, idx) => idx === i ? e.target.value : x) } : c) } }))} /><button type="button" onClick={() => setCategories((p) => ({ ...p, [type]: { ...p[type], options: p[type].options.map((c) => c.id === cat.id ? { ...c, items: c.items.filter((_, idx) => idx !== i) } : c) } }))} className="rounded-2xl bg-red-50 text-red-500">×</button></div>)}<div className="grid grid-cols-[1fr_84px] gap-2"><Input value={newItems[cat.id] || ""} onChange={(e) => setNewItems((p) => ({ ...p, [cat.id]: e.target.value }))} placeholder="新增記帳項目" /><SmallButton type="button" onClick={() => addItem(cat.id)}>新增</SmallButton></div></div></div>)}</div>; }
 function DepartmentSettings({ departments, setDepartments, setDailyCashData, setFixedData }) { const [name, setName] = useState(""); function add() { if (!name.trim()) return; const value = name.trim().toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "") || `department_${Date.now()}`; setDepartments((p) => [...p, { value, label: name.trim() }]); setDailyCashData((p) => ({ ...p, [value]: [] })); setFixedData((p) => ({ ...p, [value]: [] })); setName(""); } return <div className="space-y-4"><div className="grid grid-cols-[1fr_84px] gap-2"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="新增部門" /><SmallButton type="button" onClick={add}>新增</SmallButton></div>{departments.map((d, i) => <div key={d.value} className="rounded-3xl border border-gray-100 p-4"><Field label="部門名稱"><Input value={d.label} onChange={(e) => setDepartments((p) => p.map((x, idx) => idx === i ? { ...x, label: e.target.value } : x))} /></Field><Field label="部門代碼"><Input value={d.value} onChange={(e) => setDepartments((p) => p.map((x, idx) => idx === i ? { ...x, value: e.target.value } : x))} /></Field></div>)}</div>; }
-function VendorManagement({ vendors, setVendors, departments }) { const empty = { vendorCode: "", vendorName: "", type: "cash", department: departments[0]?.value || "bakery", deductPercent: "" }; const [form, setForm] = useState(empty); const [filter, setFilter] = useState("cash"); function save() { if (!form.vendorCode || !form.vendorName) return; setVendors((p) => [{ ...form, id: `vendor_${Date.now()}`, deductPercent: Number(form.deductPercent || 0) }, ...p]); setForm({ ...empty, type: filter }); } return <div className="space-y-5"><div className="grid grid-cols-2 rounded-2xl bg-gray-50 p-1"><button type="button" onClick={() => setFilter("cash")} className={`rounded-xl px-4 py-3 font-black ${filter === "cash" ? "bg-[#06C755] text-white" : "text-[#06C755]"}`}>現結廠商</button><button type="button" onClick={() => setFilter("monthly")} className={`rounded-xl px-4 py-3 font-black ${filter === "monthly" ? "bg-[#06C755] text-white" : "text-[#06C755]"}`}>月結廠商</button></div><div className="space-y-3 rounded-3xl bg-gray-50 p-4"><div className="grid grid-cols-2 gap-3"><Field label="廠編"><Input value={form.vendorCode} onChange={(e) => setForm((p) => ({ ...p, vendorCode: e.target.value }))} /></Field><Field label="扣％"><Input type="number" value={form.deductPercent} onChange={(e) => setForm((p) => ({ ...p, deductPercent: e.target.value }))} /></Field></div><Field label="廠商名稱"><Input value={form.vendorName} onChange={(e) => setForm((p) => ({ ...p, vendorName: e.target.value }))} /></Field><Field label="對應部門"><Select value={form.department} onChange={(e) => setForm((p) => ({ ...p, department: e.target.value }))}>{departments.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}</Select></Field><Field label="廠商類型"><Select value={form.type} onChange={(e) => setForm((p) => ({ ...p, type: e.target.value }))}><option value="cash">現結廠商</option><option value="monthly">月結廠商</option></Select></Field><PrimaryButton type="button" onClick={save}>新增廠商</PrimaryButton></div>{vendors.filter((v) => v.type === filter).map((v) => <div key={v.id} className="rounded-3xl border border-gray-100 p-4"><div className="flex justify-between"><div><p className="font-black">{v.vendorCode}｜{v.vendorName}</p><p className="mt-1 text-xs font-bold text-gray-400">{getDepartmentLabel(v.department, departments)}｜扣 {v.deductPercent}%</p></div><SmallButton type="button" tone="red" onClick={() => setVendors((p) => p.filter((x) => x.id !== v.id))}>刪除</SmallButton></div></div>)}</div>; }
+function VendorManagement({ vendors, setVendors, departments }) {
+  const empty = { vendorCode: "", vendorName: "", type: "cash", department: departments[0]?.value || "bakery", deductPercent: "" };
+  const [form, setForm] = useState(empty);
+  const [filter, setFilter] = useState("cash");
+  const [expandedVendorId, setExpandedVendorId] = useState("");
+  const [vendorDrafts, setVendorDrafts] = useState({});
+
+  async function save() {
+    if (!form.vendorCode || !form.vendorName) return;
+    const id = `vendor_${Date.now()}`;
+    const record = { ...form, id, deductPercent: Number(form.deductPercent || 0), updatedAt: serverTimestamp() };
+    await setDoc(doc(db, "vendors", id), record);
+    setVendors((p) => [record, ...p]);
+    setForm({ ...empty, type: filter });
+  }
+
+  function startVendorEdit(vendor) {
+    setExpandedVendorId(vendor.id);
+    setVendorDrafts((prev) => ({
+      ...prev,
+      [vendor.id]: {
+        ...vendor,
+        deductPercent: String(vendor.deductPercent ?? 0),
+      },
+    }));
+  }
+
+  function updateVendorDraft(vendorId, field, value) {
+    setVendorDrafts((prev) => ({
+      ...prev,
+      [vendorId]: {
+        ...(prev[vendorId] || {}),
+        [field]: value,
+      },
+    }));
+  }
+
+  async function saveVendorEdit(vendorId) {
+    const draft = vendorDrafts[vendorId];
+    if (!draft || !draft.vendorCode || !draft.vendorName) return;
+    const record = {
+      ...draft,
+      deductPercent: Number(draft.deductPercent || 0),
+      updatedAt: serverTimestamp(),
+    };
+    await setDoc(doc(db, "vendors", vendorId), record, { merge: true });
+    setVendors((prev) => prev.map((item) => (item.id === vendorId ? record : item)));
+    setExpandedVendorId("");
+  }
+
+  async function deleteVendor(vendorId) {
+    await deleteDoc(doc(db, "vendors", vendorId));
+    setVendors((prev) => prev.filter((item) => item.id !== vendorId));
+  }
+
+  const filteredVendors = vendors.filter((v) => v.type === filter);
+
+  return <div className="space-y-5"><div className="grid grid-cols-2 rounded-2xl bg-gray-50 p-1"><button type="button" onClick={() => setFilter("cash")} className={`rounded-xl px-4 py-3 font-black ${filter === "cash" ? "bg-[#06C755] text-white" : "text-[#06C755]"}`}>現結廠商</button><button type="button" onClick={() => setFilter("monthly")} className={`rounded-xl px-4 py-3 font-black ${filter === "monthly" ? "bg-[#06C755] text-white" : "text-[#06C755]"}`}>月結廠商</button></div><div className="space-y-3 rounded-3xl bg-gray-50 p-4"><h3 className="font-black text-gray-950">新增廠商</h3><div className="grid grid-cols-2 gap-3"><Field label="廠編"><Input value={form.vendorCode} onChange={(e) => setForm((p) => ({ ...p, vendorCode: e.target.value }))} /></Field><Field label="扣％"><Input type="number" value={form.deductPercent} onChange={(e) => setForm((p) => ({ ...p, deductPercent: e.target.value }))} /></Field></div><Field label="廠商名稱"><Input value={form.vendorName} onChange={(e) => setForm((p) => ({ ...p, vendorName: e.target.value }))} /></Field><Field label="對應部門"><Select value={form.department} onChange={(e) => setForm((p) => ({ ...p, department: e.target.value }))}>{departments.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}</Select></Field><Field label="廠商類型"><Select value={form.type} onChange={(e) => setForm((p) => ({ ...p, type: e.target.value }))}><option value="cash">現結廠商</option><option value="monthly">月結廠商</option></Select></Field><PrimaryButton type="button" onClick={save}>新增廠商</PrimaryButton></div><div className="space-y-3">{filteredVendors.length === 0 && <div className="rounded-3xl bg-gray-50 p-4 text-sm font-bold text-gray-400">目前沒有{filter === "cash" ? "現結" : "月結"}廠商。</div>}{filteredVendors.map((v) => { const draft = vendorDrafts[v.id]; const isOpen = expandedVendorId === v.id; return <div key={v.id} className="rounded-3xl border border-gray-100 p-4"><div className="flex justify-between gap-3"><button type="button" onClick={() => startVendorEdit(v)} className="min-w-0 flex-1 text-left"><p className="font-black text-gray-950">{v.vendorCode}｜{v.vendorName}</p><p className="mt-1 text-xs font-bold text-gray-400">{getDepartmentLabel(v.department, departments)}｜扣 {Number(v.deductPercent || 0)}%</p><p className="mt-1 text-xs font-bold text-gray-300">點擊或按編輯可展開修改</p></button><div className="flex shrink-0 flex-col gap-2"><SmallButton type="button" tone="gray" onClick={() => startVendorEdit(v)}>編輯</SmallButton><SmallButton type="button" tone="red" onClick={() => deleteVendor(v.id)}>刪除</SmallButton></div></div>{isOpen && draft && <div className="mt-4 space-y-3 rounded-3xl bg-gray-50 p-4"><div className="grid grid-cols-2 gap-3"><Field label="廠編"><Input value={draft.vendorCode} onChange={(e) => updateVendorDraft(v.id, "vendorCode", e.target.value)} /></Field><Field label="扣％"><Input type="number" value={draft.deductPercent} onChange={(e) => updateVendorDraft(v.id, "deductPercent", e.target.value)} /></Field></div><Field label="廠商名稱"><Input value={draft.vendorName} onChange={(e) => updateVendorDraft(v.id, "vendorName", e.target.value)} /></Field><Field label="對應部門"><Select value={draft.department} onChange={(e) => updateVendorDraft(v.id, "department", e.target.value)}>{departments.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}</Select></Field><Field label="廠商類型"><Select value={draft.type} onChange={(e) => updateVendorDraft(v.id, "type", e.target.value)}><option value="cash">現結廠商</option><option value="monthly">月結廠商</option></Select></Field><div className="grid grid-cols-2 gap-2"><PrimaryButton type="button" onClick={() => saveVendorEdit(v.id)}>儲存修改</PrimaryButton><SmallButton type="button" tone="gray" className="rounded-2xl py-3" onClick={() => setExpandedVendorId("")}>收合</SmallButton></div></div>}</div>; })}</div></div>; }
 function UserManagement({ departments, users, setUsers, joinRequests, setJoinRequests }) {
   const [expanded, setExpanded] = useState("");
   const [newUser, setNewUser] = useState({ id: "", name: "", role: "staff", department: departments[0]?.value || "bakery" });
