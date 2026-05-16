@@ -195,40 +195,136 @@ function LoginScreen({ authState }) {
   return <div className="min-h-screen bg-[#F6F8FA] p-4"><main className="mx-auto max-w-xl pt-12"><Card><p className="text-xs font-black uppercase tracking-widest text-[#06C755]">Enterprise Finance</p><h1 className="mt-2 text-3xl font-black text-gray-950">企業財務系統</h1><p className="mt-3 text-sm leading-6 text-gray-500">系統透過 LINE LIFF 取得 LINE userId，再登入 Firebase。</p>{authState.loading && <p className="mt-5 font-bold text-gray-500">登入檢查中...</p>}{authState.error && <p className="mt-5 rounded-2xl bg-red-50 p-4 text-sm font-bold text-red-500">{authState.error}</p>}{authState.lineUserId && !authState.user && <div className="mt-5 space-y-4 rounded-2xl bg-amber-50 p-4 text-sm font-bold text-amber-700"><div>已取得 LINE userId：<span className="break-all">{authState.lineUserId}</span><br />但尚未建立員工帳號，可直接送出加入申請。</div><Field label="姓名"><Input value={requestName} onChange={(e) => setRequestName(e.target.value)} placeholder="請輸入姓名" /></Field><Field label="申請部門"><Select value={requestDepartment} onChange={(e) => setRequestDepartment(e.target.value)}>{DEFAULT_DEPARTMENTS.map((dept) => <option key={dept.value} value={dept.value}>{dept.label}</option>)}</Select></Field><PrimaryButton type="button" onClick={submitJoinRequest}>送出加入申請</PrimaryButton>{requestMessage && <p className="rounded-2xl bg-white/70 p-3 text-[#06C755]">{requestMessage}</p>}</div>}</Card></main></div>;
 }
 
-function calcDepartment(department, dailyCashData, fixedData, departments) {
-  const records = dailyCashData[department] || [];
-  const fixedItems = fixedData[department] || [];
+function getRecordMonth(record) { return String(record?.date || "").slice(0, 7); }
+function getBillMonthValue(bill) { return bill?.billMonth || String(bill?.startDate || "").slice(0, 7); }
+function isSameMonth(value, month) { return !month || String(value || "").slice(0, 7) === month; }
+function normalizeFixedItems(record) {
+  const operatingItems = (record?.operatingItems || []).map((item) => ({ ...item, amount: Number(item.amount || 0) }));
+  const personnelItems = (record?.personnelItems || []).map((item) => ({ ...item, amount: Number(item.amount || 0) }));
+  const hasGroupedItems = operatingItems.length || personnelItems.length;
+  if (hasGroupedItems) return { operatingItems, personnelItems };
+
+  const legacyItems = (record?.items || []).map((item) => ({ ...item, amount: Number(item.amount || 0) }));
+  return { operatingItems: legacyItems, personnelItems: [] };
+}
+function getFixedSummary(department, month, fixedRecords = [], fixedData = {}) {
+  const record = fixedRecords.find((entry) => entry.department === department && entry.month === month);
+  if (record) {
+    const grouped = normalizeFixedItems(record);
+    const operating = grouped.operatingItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const personnel = grouped.personnelItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    return { operating, personnel, total: operating + personnel, record };
+  }
+
+  const legacyItems = fixedData[department] || [];
+  const operating = legacyItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  return { operating, personnel: 0, total: operating, record: null };
+}
+function isCostRecord(record) {
+  const categoryText = `${record.categoryId || ""} ${record.category || ""}`;
+  const itemText = `${record.item || ""} ${record.note || ""}`;
+  return record.type === "expense" && (
+    categoryText.includes("cash_purchase") ||
+    categoryText.includes("現結貨款") ||
+    categoryText.includes("自行採購報銷") ||
+    itemText.includes("自行採購") ||
+    itemText.includes("報銷")
+  );
+}
+function isOperatingExpenseRecord(record) {
+  const categoryText = `${record.categoryId || ""} ${record.category || ""}`;
+  return record.type === "expense" && (
+    categoryText.includes("operating_expense") ||
+    categoryText.includes("營運支出") ||
+    categoryText.includes("other_expense") ||
+    categoryText.includes("其他支出")
+  );
+}
+function calcDepartment(department, dailyCashData, fixedData, departments, month = "", vendorBills = [], fixedRecords = []) {
+  const records = (dailyCashData[department] || []).filter((item) => !month || getRecordMonth(item) === month);
   const revenue = records.reduce((sum, item) => item.type === "income" ? sum + Number(item.amount || 0) : sum, 0);
-  const cashExpense = records.reduce((sum, item) => item.type === "expense" ? sum + Number(item.amount || 0) : sum, 0);
-  const fixedExpense = fixedItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-  return { department, departmentLabel: getDepartmentLabel(department, departments), revenue, cashExpense, fixedExpense, totalExpense: cashExpense + fixedExpense, netProfit: revenue - cashExpense - fixedExpense };
+  const operatingDailyExpense = records.reduce((sum, item) => isOperatingExpenseRecord(item) ? sum + Number(item.amount || 0) : sum, 0);
+  const dailyCost = records.reduce((sum, item) => isCostRecord(item) ? sum + Number(item.amount || 0) : sum, 0);
+  const monthlyPurchase = vendorBills
+    .filter((bill) => bill.department === department && (!month || getBillMonthValue(bill) === month))
+    .reduce((sum, bill) => sum + Number(bill.billTotal || 0), 0);
+  const fixedSummary = getFixedSummary(department, month, fixedRecords, fixedData);
+  const operatingExpense = operatingDailyExpense + fixedSummary.total;
+  const businessCost = dailyCost + monthlyPurchase;
+  const grossProfit = revenue - businessCost;
+  const netProfit = grossProfit - operatingExpense;
+  return {
+    department,
+    departmentLabel: getDepartmentLabel(department, departments),
+    revenue,
+    businessCost,
+    dailyCost,
+    monthlyPurchase,
+    cashExpense: businessCost,
+    operatingDailyExpense,
+    fixedOperatingExpense: fixedSummary.operating,
+    fixedPersonnelExpense: fixedSummary.personnel,
+    fixedExpense: fixedSummary.total,
+    operatingExpense,
+    totalExpense: businessCost + operatingExpense,
+    grossProfit,
+    netProfit,
+  };
 }
 
-function getCategoryBreakdown(department, type, dailyCashData) {
+function getCategoryBreakdown(department, type, dailyCashData, month = "", predicate = null) {
   const groups = {};
-  (dailyCashData[department] || []).filter((record) => record.type === type).forEach((record) => {
-    if (!groups[record.category]) groups[record.category] = { label: record.category, amount: 0, items: {} };
-    groups[record.category].amount += Number(record.amount || 0);
-    groups[record.category].items[record.item] = (groups[record.category].items[record.item] || 0) + Number(record.amount || 0);
-  });
+  (dailyCashData[department] || [])
+    .filter((record) => record.type === type)
+    .filter((record) => !month || getRecordMonth(record) === month)
+    .filter((record) => (predicate ? predicate(record) : true))
+    .forEach((record) => {
+      const groupLabel = record.category || record.categoryId || "未分類";
+      if (!groups[groupLabel]) groups[groupLabel] = { label: groupLabel, amount: 0, items: {} };
+      groups[groupLabel].amount += Number(record.amount || 0);
+      const itemLabel = record.vendorName || record.item || "未命名項目";
+      groups[groupLabel].items[itemLabel] = (groups[groupLabel].items[itemLabel] || 0) + Number(record.amount || 0);
+    });
   return Object.values(groups).map((group) => ({ ...group, items: Object.entries(group.items).map(([label, amount]) => ({ label, amount })) }));
 }
 
-function buildProfitReportRows(department, dailyCashData, fixedData, departments) {
-  const summary = calcDepartment(department, dailyCashData, fixedData, departments);
-  const incomeGroups = getCategoryBreakdown(department, "income", dailyCashData);
-  const expenseGroups = getCategoryBreakdown(department, "expense", dailyCashData);
-  const fixedItems = fixedData[department] || [];
-  const grossProfit = summary.revenue - summary.cashExpense;
+function buildProfitReportRows(department, dailyCashData, fixedData, departments, month = "", vendorBills = [], fixedRecords = []) {
+  const summary = calcDepartment(department, dailyCashData, fixedData, departments, month, vendorBills, fixedRecords);
+  const incomeGroups = getCategoryBreakdown(department, "income", dailyCashData, month);
+  const costGroups = getCategoryBreakdown(department, "expense", dailyCashData, month, isCostRecord);
+  const operatingGroups = getCategoryBreakdown(department, "expense", dailyCashData, month, isOperatingExpenseRecord);
+  const monthlyBills = vendorBills.filter((bill) => bill.department === department && (!month || getBillMonthValue(bill) === month));
+  const grossProfit = summary.grossProfit;
   const beforeTax = summary.netProfit;
   const tax = Math.max(Math.round(beforeTax * 0.05), 0);
   const rows = [{ kind: "section", name: "營業收入(A)", amount: summary.revenue, percent: "100%" }];
-  incomeGroups.forEach((group) => { rows.push({ kind: "category", name: group.label, amount: group.amount, percent: percent(group.amount, summary.revenue) }); group.items.forEach((item) => rows.push({ kind: "item", name: item.label, amount: item.amount, percent: "" })); });
-  rows.push({ kind: "section", name: "營業成本(B)", amount: summary.cashExpense, percent: percent(summary.cashExpense, summary.revenue) });
-  expenseGroups.forEach((group) => { rows.push({ kind: "category", name: group.label, amount: group.amount, percent: "" }); group.items.forEach((item) => rows.push({ kind: "item", name: item.label, amount: item.amount, percent: "" })); });
+
+  incomeGroups.forEach((group) => {
+    rows.push({ kind: "category", name: group.label, amount: group.amount, percent: percent(group.amount, summary.revenue) });
+    group.items.forEach((item) => rows.push({ kind: "item", name: item.label, amount: item.amount, percent: "" }));
+  });
+
+  rows.push({ kind: "section", name: "營業成本(B)", amount: summary.businessCost, percent: percent(summary.businessCost, summary.revenue) });
+  costGroups.forEach((group) => {
+    rows.push({ kind: "category", name: group.label, amount: group.amount, percent: "" });
+    group.items.forEach((item) => rows.push({ kind: "item", name: item.label, amount: item.amount, percent: "" }));
+  });
+  if (monthlyBills.length) {
+    const monthlyTotal = monthlyBills.reduce((sum, bill) => sum + Number(bill.billTotal || 0), 0);
+    rows.push({ kind: "category", name: "月結貨款", amount: monthlyTotal, percent: "" });
+    monthlyBills
+      .sort((a, b) => String(a.vendorCode || "").localeCompare(String(b.vendorCode || ""), "zh-Hant", { numeric: true, sensitivity: "base" }))
+      .forEach((bill) => rows.push({ kind: "item", name: `${bill.vendorCode || ""} ${bill.vendorName || ""}`.trim(), amount: bill.billTotal, percent: "" }));
+  }
+
   rows.push({ kind: "section", name: "毛利(C=A-B)", amount: grossProfit, percent: percent(grossProfit, summary.revenue) });
-  rows.push({ kind: "section", name: "營運費用(D)", amount: summary.fixedExpense, percent: percent(summary.fixedExpense, summary.revenue) });
-  fixedItems.forEach((item) => rows.push({ kind: "item", name: item.label, amount: item.amount, percent: "" }));
+  rows.push({ kind: "section", name: "營運費用(D)", amount: summary.operatingExpense, percent: percent(summary.operatingExpense, summary.revenue) });
+  operatingGroups.forEach((group) => {
+    rows.push({ kind: "category", name: group.label, amount: group.amount, percent: "" });
+    group.items.forEach((item) => rows.push({ kind: "item", name: item.label, amount: item.amount, percent: "" }));
+  });
+  rows.push({ kind: "category", name: "月固定支出－營業支出", amount: summary.fixedOperatingExpense, percent: "" });
+  rows.push({ kind: "category", name: "月固定支出－人事費用", amount: summary.fixedPersonnelExpense, percent: "" });
   rows.push({ kind: "section", name: "利益(E=C-D)", amount: summary.netProfit, percent: percent(summary.netProfit, summary.revenue) });
   rows.push({ kind: "section", name: "非營業收益(F)", amount: 0, percent: "" });
   rows.push({ kind: "section", name: "非營業損損(G)", amount: 0, percent: "" });
@@ -618,8 +714,8 @@ function MonthlyFixed({ departments, fixedData, setFixedData, fixedRecords, setF
 }
 
 function ProfitReportTable({ title, rows, onExportCsv }) { const rowClass = (kind) => kind === "final" ? "bg-orange-100 font-black" : kind === "section" ? "bg-green-100 font-black" : kind === "category" ? "bg-white font-black text-sky-700" : "bg-white text-gray-600"; return <Card className="overflow-hidden p-0"><div className="bg-slate-800 px-4 py-3 text-white"><h2 className="text-center text-base font-black">{title}</h2><button type="button" onClick={onExportCsv} className="mt-3 w-full rounded-2xl bg-white/15 px-3 py-2 text-xs font-black">輸出 CSV</button></div><div className="divide-y divide-gray-100 md:hidden">{rows.map((row, i) => <div key={i} className={`px-4 py-3 ${rowClass(row.kind)}`}><div className="flex justify-between gap-3"><div className={row.kind === "item" ? "pl-4 text-sm" : "text-sm"}>{row.kind === "item" ? `- ${row.name}` : row.name}</div><div className="text-right"><div className="font-black">{plainMoney(row.amount)}</div><div className="text-xs text-gray-500">{row.percent}</div></div></div></div>)}</div><div className="hidden overflow-x-auto md:block"><table className="w-full text-sm"><tbody>{rows.map((row, i) => <tr key={i} className={rowClass(row.kind)}><td className="border px-2 py-2">{row.kind === "item" ? `- ${row.name}` : row.name}</td><td className="border px-2 py-2 text-right">{plainMoney(row.amount)}</td><td className="border px-2 py-2 text-right">{row.percent}</td></tr>)}</tbody></table></div></Card>; }
-function ProfitLoss({ currentUser, isAdmin, departments, dailyCashData, fixedData }) { const [month, setMonth] = useState("2026-05"); const [department, setDepartment] = useState(currentUser.department === "all" ? departments[0]?.value || "bakery" : currentUser.department); const available = isAdmin ? departments : departments.filter((d) => d.value === currentUser.department); const summary = calcDepartment(department, dailyCashData, fixedData, departments); const rows = buildProfitReportRows(department, dailyCashData, fixedData, departments); function exportCsv() { downloadCsv(`${month}_${getDepartmentLabel(department, departments)}_損益表.csv`, [["會計科目", "金額", "%"], ...rows.map((r) => [r.kind === "item" ? `- ${r.name}` : r.name, r.amount, r.percent])]); } return <div className="space-y-5"><PageHeader title="部門損益表" subtitle="手機版營運月報表。" icon={ICONS.chart} /><Card className="space-y-4"><Field label="月份"><Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} /></Field><Field label="部門"><Select value={department} onChange={(e) => setDepartment(e.target.value)}>{available.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}</Select></Field></Card><div className="grid grid-cols-2 gap-3"><StatCard label="營業收入" value={summary.revenue} /><StatCard label="營業成本" value={summary.cashExpense} /><StatCard label="營運費用" value={summary.fixedExpense} /><StatCard label="稅前損益" value={summary.netProfit} tone="green" /></div><Card><div className="h-64"><ResponsiveContainer width="100%" height="100%"><BarChart data={[{ name: "收入", 金額: summary.revenue }, { name: "成本", 金額: summary.cashExpense }, { name: "費用", 金額: summary.fixedExpense }]}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" /><YAxis /><Tooltip formatter={(v) => money(v)} /><Bar dataKey="金額" fill={GREEN} radius={[12, 12, 0, 0]} /></BarChart></ResponsiveContainer></div></Card><ProfitReportTable title={`${month} ${getDepartmentLabel(department, departments)} 營運月報表`} rows={rows} onExportCsv={exportCsv} /></div>; }
-function Summary({ departments, dailyCashData, fixedData }) { const [month, setMonth] = useState("2026-05"); const rows = departments.map((d) => calcDepartment(d.value, dailyCashData, fixedData, departments)); const total = rows.reduce((a, r) => ({ revenue: a.revenue + r.revenue, cashExpense: a.cashExpense + r.cashExpense, fixedExpense: a.fixedExpense + r.fixedExpense, totalExpense: a.totalExpense + r.totalExpense, netProfit: a.netProfit + r.netProfit }), { revenue: 0, cashExpense: 0, fixedExpense: 0, totalExpense: 0, netProfit: 0 }); function exportCsv() { downloadCsv(`${month}_企業總損益表.csv`, [["部門", "收入", "現金支出", "固定支出", "淨利"], ...rows.map((r) => [r.departmentLabel, r.revenue, r.cashExpense, r.fixedExpense, r.netProfit]), ["合計", total.revenue, total.cashExpense, total.fixedExpense, total.netProfit]]); } return <div className="space-y-5"><PageHeader title="總損益表" subtitle="公司全部部門彙總。" icon={ICONS.chart} /><Card className="space-y-4"><Field label="月份"><Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} /></Field><SmallButton type="button" onClick={exportCsv} className="rounded-2xl py-3">輸出 CSV</SmallButton></Card><section className="rounded-[28px] bg-[#06C755] p-5 text-white"><p className="text-sm font-bold text-white/75">公司稅前淨利</p><p className="mt-1 text-4xl font-black">{money(total.netProfit)}</p></section><Card><div className="h-72"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={rows.map((r) => ({ name: r.departmentLabel, value: r.revenue }))} cx="50%" cy="50%" outerRadius={92} dataKey="value" label={({ name, percent: p }) => `${name} ${(p * 100).toFixed(0)}%`}>{rows.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}</Pie><Tooltip formatter={(v) => money(v)} /></PieChart></ResponsiveContainer></div></Card><Card className="overflow-hidden p-0"><div className="overflow-x-auto"><table className="w-full min-w-[700px] text-sm"><tbody>{rows.map((r) => <tr key={r.department}><td className="border px-2 py-2 font-black">{r.departmentLabel}</td><td className="border px-2 py-2 text-right">{plainMoney(r.revenue)}</td><td className="border px-2 py-2 text-right">{plainMoney(r.cashExpense)}</td><td className="border px-2 py-2 text-right">{plainMoney(r.fixedExpense)}</td><td className="border px-2 py-2 text-right font-black">{plainMoney(r.netProfit)}</td></tr>)}</tbody></table></div></Card></div>; }
+function ProfitLoss({ currentUser, isAdmin, departments, dailyCashData, fixedData, fixedRecords = [], vendorBills = [] }) { const [month, setMonth] = useState(() => getTodayDate().slice(0, 7)); const [department, setDepartment] = useState(currentUser.department === "all" ? departments[0]?.value || "bakery" : currentUser.department); const available = isAdmin ? departments : departments.filter((d) => d.value === currentUser.department); const summary = calcDepartment(department, dailyCashData, fixedData, departments, month, vendorBills, fixedRecords); const rows = buildProfitReportRows(department, dailyCashData, fixedData, departments, month, vendorBills, fixedRecords); function exportCsv() { downloadCsv(`${month}_${getDepartmentLabel(department, departments)}_損益表.csv`, [["會計科目", "金額", "%"], ...rows.map((r) => [r.kind === "item" ? `- ${r.name}` : r.name, r.amount, r.percent])]); } return <div className="space-y-5"><PageHeader title="部門損益表" subtitle="手機版營運月報表。" icon={ICONS.chart} /><Card className="space-y-4"><Field label="月份"><Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} /></Field><Field label="部門"><Select value={department} onChange={(e) => setDepartment(e.target.value)}>{available.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}</Select></Field></Card><div className="grid grid-cols-2 gap-3"><StatCard label="營業收入" value={summary.revenue} /><StatCard label="營業成本" value={summary.businessCost} /><StatCard label="營運費用" value={summary.operatingExpense} /><StatCard label="稅前損益" value={summary.netProfit} tone="green" /></div><Card><div className="h-64"><ResponsiveContainer width="100%" height="100%"><BarChart data={[{ name: "收入", 金額: summary.revenue }, { name: "成本", 金額: summary.businessCost }, { name: "費用", 金額: summary.operatingExpense }]}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" /><YAxis /><Tooltip formatter={(v) => money(v)} /><Bar dataKey="金額" fill={GREEN} radius={[12, 12, 0, 0]} /></BarChart></ResponsiveContainer></div></Card><ProfitReportTable title={`${month} ${getDepartmentLabel(department, departments)} 營運月報表`} rows={rows} onExportCsv={exportCsv} /></div>; }
+function Summary({ departments, dailyCashData, fixedData, fixedRecords = [], vendorBills = [] }) { const [month, setMonth] = useState(() => getTodayDate().slice(0, 7)); const rows = departments.map((d) => calcDepartment(d.value, dailyCashData, fixedData, departments, month, vendorBills, fixedRecords)); const total = rows.reduce((a, r) => ({ revenue: a.revenue + r.revenue, businessCost: a.businessCost + r.businessCost, operatingExpense: a.operatingExpense + r.operatingExpense, totalExpense: a.totalExpense + r.totalExpense, netProfit: a.netProfit + r.netProfit }), { revenue: 0, businessCost: 0, operatingExpense: 0, totalExpense: 0, netProfit: 0 }); function exportCsv() { downloadCsv(`${month}_企業總損益表.csv`, [["部門", "營業收入", "營業成本", "營運費用", "淨利"], ...rows.map((r) => [r.departmentLabel, r.revenue, r.businessCost, r.operatingExpense, r.netProfit]), ["合計", total.revenue, total.businessCost, total.operatingExpense, total.netProfit]]); } return <div className="space-y-5"><PageHeader title="總損益表" subtitle="公司全部部門彙總。" icon={ICONS.chart} /><Card className="space-y-4"><Field label="月份"><Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} /></Field><SmallButton type="button" onClick={exportCsv} className="rounded-2xl py-3">輸出 CSV</SmallButton></Card><section className="rounded-[28px] bg-[#06C755] p-5 text-white"><p className="text-sm font-bold text-white/75">公司稅前淨利</p><p className="mt-1 text-4xl font-black">{money(total.netProfit)}</p></section><Card><div className="h-72"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={rows.map((r) => ({ name: r.departmentLabel, value: r.revenue }))} cx="50%" cy="50%" outerRadius={92} dataKey="value" label={({ name, percent: p }) => `${name} ${(p * 100).toFixed(0)}%`}>{rows.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}</Pie><Tooltip formatter={(v) => money(v)} /></PieChart></ResponsiveContainer></div></Card><Card className="overflow-hidden p-0"><div className="overflow-x-auto"><table className="w-full min-w-[700px] text-sm"><tbody>{rows.map((r) => <tr key={r.department}><td className="border px-2 py-2 font-black">{r.departmentLabel}</td><td className="border px-2 py-2 text-right">{plainMoney(r.revenue)}</td><td className="border px-2 py-2 text-right">{plainMoney(r.businessCost)}</td><td className="border px-2 py-2 text-right">{plainMoney(r.operatingExpense)}</td><td className="border px-2 py-2 text-right font-black">{plainMoney(r.netProfit)}</td></tr>)}</tbody></table></div></Card></div>; }
 function ReportsPage(props) { const [open, setOpen] = useState("summary"); return <div className="space-y-5"><PageHeader title="報表中心" subtitle="總損益表與部門損益表。" icon={ICONS.chart} /><AccordionSection title="總損益表" subtitle="查看全部部門彙總" icon={ICONS.chart} open={open === "summary"} onToggle={() => setOpen(open === "summary" ? "" : "summary")}><Summary {...props} /></AccordionSection><AccordionSection title="部門損益表" subtitle="查看單一部門營運月報表" icon={ICONS.chart} open={open === "profit"} onToggle={() => setOpen(open === "profit" ? "" : "profit")}><ProfitLoss currentUser={{ role: "admin", department: "all" }} isAdmin {...props} /></AccordionSection></div>; }
 
 function VendorBills({ vendorBills, setVendorBills, vendors, departments }) {
@@ -866,5 +962,5 @@ export default function App() {
 
   if (authState.loading || authState.error || !currentUser) return <LoginScreen authState={authState} />;
   function setAdminPage(nextPage) { if (!isAdmin && nextPage !== "daily") return; setPage(nextPage); }
-  return <div className="min-h-screen bg-[#F6F8FA] pb-24 text-gray-950"><div className="sticky top-0 z-40 border-b border-gray-100 bg-white/95 backdrop-blur"><div className="mx-auto flex max-w-xl items-center px-4 py-3"><div><p className="text-xs font-black uppercase tracking-widest text-[#06C755]">Enterprise Finance</p><p className="text-sm font-black text-gray-950">企業財務系統</p></div></div></div><main className="mx-auto max-w-xl px-4 py-5"><ExportPanel exportFile={exportFile} onClose={() => setExportFile(null)} />{page === "daily" && <DailyCash currentUser={currentUser} isAdmin={isAdmin} categories={categories} departments={departments} dailyCashData={dailyCashData} setDailyCashData={setDailyCashData} vendors={vendors} />}{page === "reports" && isAdmin && <ReportsPage departments={departments} dailyCashData={dailyCashData} fixedData={fixedData} />}{page === "monthly-fixed" && isAdmin && <MonthlyFixed departments={departments} fixedData={fixedData} setFixedData={setFixedData} fixedRecords={fixedRecords} setFixedRecords={setFixedRecords} />}{page === "vendor-bills" && isAdmin && <VendorBills vendorBills={vendorBills} setVendorBills={setVendorBills} vendors={vendors} departments={departments} />}{page === "settings" && isAdmin && <SettingsPage categories={categories} setCategories={setCategories} departments={departments} setDepartments={setDepartments} setDailyCashData={setDailyCashData} setFixedData={setFixedData} vendors={vendors} setVendors={setVendors} users={users} setUsers={setUsers} joinRequests={joinRequests} setJoinRequests={setJoinRequests} />}</main><NavBar page={page} setPage={setAdminPage} isAdmin={isAdmin} /></div>;
+  return <div className="min-h-screen bg-[#F6F8FA] pb-24 text-gray-950"><div className="sticky top-0 z-40 border-b border-gray-100 bg-white/95 backdrop-blur"><div className="mx-auto flex max-w-xl items-center px-4 py-3"><div><p className="text-xs font-black uppercase tracking-widest text-[#06C755]">Enterprise Finance</p><p className="text-sm font-black text-gray-950">企業財務系統</p></div></div></div><main className="mx-auto max-w-xl px-4 py-5"><ExportPanel exportFile={exportFile} onClose={() => setExportFile(null)} />{page === "daily" && <DailyCash currentUser={currentUser} isAdmin={isAdmin} categories={categories} departments={departments} dailyCashData={dailyCashData} setDailyCashData={setDailyCashData} vendors={vendors} />}{page === "reports" && isAdmin && <ReportsPage departments={departments} dailyCashData={dailyCashData} fixedData={fixedData} fixedRecords={fixedRecords} vendorBills={vendorBills} />}{page === "monthly-fixed" && isAdmin && <MonthlyFixed departments={departments} fixedData={fixedData} setFixedData={setFixedData} fixedRecords={fixedRecords} setFixedRecords={setFixedRecords} />}{page === "vendor-bills" && isAdmin && <VendorBills vendorBills={vendorBills} setVendorBills={setVendorBills} vendors={vendors} departments={departments} />}{page === "settings" && isAdmin && <SettingsPage categories={categories} setCategories={setCategories} departments={departments} setDepartments={setDepartments} setDailyCashData={setDailyCashData} setFixedData={setFixedData} vendors={vendors} setVendors={setVendors} users={users} setUsers={setUsers} joinRequests={joinRequests} setJoinRequests={setJoinRequests} />}</main><NavBar page={page} setPage={setAdminPage} isAdmin={isAdmin} /></div>;
 }
