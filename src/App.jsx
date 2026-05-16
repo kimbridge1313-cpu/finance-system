@@ -312,9 +312,6 @@ function buildProfitReportRows(department, dailyCashData, fixedData, departments
   if (monthlyBills.length) {
     const monthlyTotal = monthlyBills.reduce((sum, bill) => sum + Number(bill.billTotal || 0), 0);
     rows.push({ kind: "category", name: "月結貨款", amount: monthlyTotal, percent: "" });
-    monthlyBills
-      .sort((a, b) => String(a.vendorCode || "").localeCompare(String(b.vendorCode || ""), "zh-Hant", { numeric: true, sensitivity: "base" }))
-      .forEach((bill) => rows.push({ kind: "item", name: `${bill.vendorCode || ""} ${bill.vendorName || ""}`.trim(), amount: bill.billTotal, percent: "" }));
   }
 
   rows.push({ kind: "section", name: "毛利(C=A-B)", amount: grossProfit, percent: percent(grossProfit, summary.revenue) });
