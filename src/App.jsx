@@ -260,7 +260,22 @@ function InlineIcon({ icon }) { return <span className="inline-flex h-5 w-5 item
 function PageHeader({ title, subtitle, icon }) { return <div className="flex items-start justify-between gap-4"><div><h1 className="text-2xl font-black tracking-tight text-gray-950">{title}</h1><p className="mt-1 text-sm leading-6 text-gray-500">{subtitle}</p></div><span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#06C755]/10 text-xl font-black text-[#06C755]">{icon}</span></div>; }
 function Card({ children, className = "" }) { return <section className={`rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-gray-100 ${className}`}>{children}</section>; }
 function Field({ label, children }) { return <label className="block min-w-0"><span className="text-sm font-bold text-gray-700">{label}</span><div className="mt-2 min-w-0">{children}</div></label>; }
-function Input(props) { const { className = "", ...rest } = props; return <input {...rest} className={`block min-w-0 max-w-full box-border w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-[15px] outline-none transition focus:border-[#06C755] focus:ring-4 focus:ring-[#06C755]/10 ${className}`} />; }
+function formatDateDisplayValue(type, value) {
+  if (!value) return type === "month" ? "請選擇月份" : "請選擇日期";
+  if (type === "month") {
+    const [year, month] = String(value).split("-");
+    return year && month ? `${year}年${Number(month)}月` : value;
+  }
+  const [year, month, day] = String(value).split("-");
+  return year && month && day ? `${year}年${Number(month)}月${Number(day)}日` : value;
+}
+function Input(props) {
+  const { className = "", type, value, onChange, ...rest } = props;
+  if (type === "date" || type === "month") {
+    return <div className={`relative block min-w-0 max-w-full box-border w-full overflow-hidden rounded-2xl border border-gray-200 bg-white px-4 py-3 text-center text-[15px] leading-6 outline-none transition focus-within:border-[#06C755] focus-within:ring-4 focus-within:ring-[#06C755]/10 ${className}`}><span className="pointer-events-none block truncate text-gray-950">{formatDateDisplayValue(type, value)}</span><input {...rest} type={type} value={value || ""} onChange={onChange} className="absolute inset-0 block h-full w-full min-w-0 max-w-full cursor-pointer opacity-0" style={{ WebkitAppearance: "none", appearance: "none" }} /></div>;
+  }
+  return <input {...rest} type={type} value={value} onChange={onChange} className={`block min-w-0 max-w-full box-border w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-[15px] outline-none transition focus:border-[#06C755] focus:ring-4 focus:ring-[#06C755]/10 ${className}`} />;
+}
 function TextArea(props) { const { className = "", ...rest } = props; return <textarea {...rest} className={`block min-w-0 max-w-full box-border w-full resize-none rounded-2xl border border-gray-200 bg-white px-4 py-3 text-[15px] outline-none transition focus:border-[#06C755] focus:ring-4 focus:ring-[#06C755]/10 ${className}`} />; }
 function getDeductRule(vendor) { return vendor?.deductRule ?? vendor?.deductPercent ?? ""; }
 function Select(props) { const { className = "", children, ...rest } = props; return <div className="relative"><select {...rest} className={`block min-w-0 max-w-full box-border w-full appearance-none rounded-2xl border border-gray-200 bg-white px-4 py-3 pr-10 text-[15px] outline-none transition focus:border-[#06C755] focus:ring-4 focus:ring-[#06C755]/10 disabled:bg-gray-50 disabled:text-gray-400 ${className}`}>{children}</select><span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-gray-400">{ICONS.chevron}</span></div>; }
