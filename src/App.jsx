@@ -356,13 +356,14 @@ function VendorBills({ vendorBills, setVendorBills, vendors, departments }) {
   async function saveBill() { if (!form.vendorId || !form.billMonth) return; const id = `bill_${Date.now()}`; const record = { ...paymentDefaults(form), id, billMonth: form.billMonth, billTotal: Number(form.billTotal || 0), deductPercent: String(form.deductPercent || ""), updatedAt: serverTimestamp() }; await setDoc(doc(db, "vendorBills", id), record); setVendorBills((prev) => [record, ...prev]); }
   function filteredBills() { return vendorBills.filter((b) => { const monthOk = !filterMonth || getBillMonth(b) === filterMonth; const depOk = filterDepartment === "all" || b.department === filterDepartment; const status = b.paymentMethod === "支票" ? b.ticketStatus || "pending" : "none"; const ticketOk = ticketFilter === "all" || status === ticketFilter; return monthOk && depOk && ticketOk; }); }
   const bills = filteredBills();
+  const sortedBillsForExport = [...bills].sort((a, b) => String(a.vendorCode || "").localeCompare(String(b.vendorCode || ""), "zh-Hant", { numeric: true, sensitivity: "base" }));
   const total = bills.reduce((s, b) => s + Number(b.billTotal || 0), 0);
   const pending = vendorBills.filter((b) => b.paymentMethod === "支票" && (b.ticketStatus || "pending") !== "arrived").length;
   const arrived = vendorBills.filter((b) => b.paymentMethod === "支票" && (b.ticketStatus || "pending") === "arrived").length;
   function exportBills() {
     downloadCsv(`月結貨款帳單_${filterMonth}_${filterDepartment}.csv`, [
       ["結算月份", "廠編", "廠商", "部門", "扣款規則", "開始", "結束", "備註", "總額", "領款", "票號", "到票"],
-      ...bills.map((b) => [
+      ...sortedBillsForExport.map((b) => [
         getBillMonth(b),
         b.vendorCode,
         b.vendorName,
