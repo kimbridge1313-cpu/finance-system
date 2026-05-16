@@ -424,15 +424,93 @@ function DailyCash({ currentUser, isAdmin, categories, departments, dailyCashDat
   function handleCategoryChange(nextCategory) { const firstItem = nextCategory === "other_expense" || nextCategory === "other_revenue" ? "" : getItemOptions(categories, entryType, nextCategory)[0] || ""; setCategory(nextCategory); setEntryItem(firstItem); const autoDepartment = getAutoDepartmentForAccounting(categories, entryType, nextCategory, firstItem); if (autoDepartment) setDepartment(autoDepartment); }
   function handleEntryItemChange(nextItem) { setEntryItem(nextItem); const autoDepartment = getAutoDepartmentForAccounting(categories, entryType, category, nextItem); if (autoDepartment) setDepartment(autoDepartment); }
   function handleVendorChange(nextVendorId) { const selectedVendor = cashVendors.find((v) => v.id === nextVendorId); setVendorId(nextVendorId); if (selectedVendor?.department) setDepartment(selectedVendor.department); }
-  async function saveEntry() { const selectedVendor = cashVendors.find((v) => v.id === vendorId); const categoryLabel = categoryOptions.find((x) => x.id === category)?.label || category; const shouldVendor = entryType === "expense" && category === "cash_purchase"; const id = `${date}_${department}_${Date.now()}`; const entry = { id, date, type: entryType, category: categoryLabel, categoryId: category, item: entryItem, department, amount: Number(amount || 0), note, vendorId: shouldVendor ? vendorId : "", vendorName: shouldVendor ? selectedVendor?.vendorName || "" : "", createdBy: currentUser.id, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }; await setDoc(doc(db, "dailyCash", id), entry); setDailyCashData((prev) => ({ ...prev, [department]: [...(prev[department] || []), entry] })); }
+  async function saveEntry() {
+    const selectedVendor = cashVendors.find((v) => v.id === vendorId);
+    const categoryLabel = categoryOptions.find((x) => x.id === category)?.label || category;
+    const shouldVendor = entryType === "expense" && category === "cash_purchase";
+    const id = `${date}_${department}_${Date.now()}`;
+
+    // 本機畫面 state 不放 serverTimestamp()，避免 Firebase sentinel 物件造成重新渲染白屏。
+    const localEntry = {
+      id,
+      date,
+      type: entryType,
+      category: categoryLabel,
+      categoryId: category,
+      item: entryItem,
+      department,
+      amount: Number(amount || 0),
+      note,
+      vendorId: shouldVendor ? vendorId : "",
+      vendorName: shouldVendor ? selectedVendor?.vendorName || "" : "",
+      createdBy: currentUser.id,
+    };
+
+    await setDoc(doc(db, "dailyCash", id), {
+      ...localEntry,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    setDailyCashData((prev) => ({
+      ...prev,
+      [department]: [...(prev[department] || []), localEntry],
+    }));
+  }
   function keyOf(record) { return record.id || `${record.department}-${record.sourceIndex}`; }
   function startEdit(record) { const match = getCategoryOptions(categories, record.type).find((c) => c.label === record.category || c.id === record.category); const key = keyOf(record); setExpandedEntryKey(key); setEntryDrafts((prev) => ({ ...prev, [key]: { ...record, originalDepartment: record.department, categoryId: match?.id || record.category, amount: String(record.amount || 0), vendorId: record.vendorId || "" } })); }
   function updateDraft(key, field, value) { setEntryDrafts((prev) => { const draft = prev[key] || {}; if (field === "vendorId") { const selectedVendor = cashVendors.find((v) => v.id === value); return { ...prev, [key]: { ...draft, vendorId: value, department: selectedVendor?.department || draft.department } }; } if (field === "type") { const first = getCategoryOptions(categories, value)[0]; return { ...prev, [key]: { ...draft, type: value, categoryId: first?.id || "", item: first?.items?.[0] || "", vendorId: "" } }; } if (field === "categoryId") return { ...prev, [key]: { ...draft, categoryId: value, item: value === "other_expense" || value === "other_revenue" ? "" : getItemOptions(categories, draft.type, value)[0] || "" } }; return { ...prev, [key]: { ...draft, [field]: value } }; }); }
-  async function saveInline(key) { const draft = entryDrafts[key]; if (!draft) return; const selectedVendor = cashVendors.find((v) => v.id === draft.vendorId); const shouldVendor = draft.type === "expense" && draft.categoryId === "cash_purchase"; const categoryLabel = getCategoryOptions(categories, draft.type).find((c) => c.id === draft.categoryId)?.label || draft.categoryId; const id = draft.id || `${draft.date}_${draft.department}_${Date.now()}`; const nextEntry = { ...draft, id, date: draft.date, type: draft.type, category: categoryLabel, categoryId: draft.categoryId, item: draft.item, department: draft.department, amount: Number(draft.amount || 0), note: draft.note || "", vendorId: shouldVendor ? draft.vendorId : "", vendorName: shouldVendor ? selectedVendor?.vendorName || "" : "", updatedAt: serverTimestamp() }; await setDoc(doc(db, "dailyCash", id), nextEntry, { merge: true }); setDailyCashData((prev) => { const next = { ...prev }; const original = [...(next[draft.originalDepartment] || [])]; original.splice(draft.sourceIndex, 1); next[draft.originalDepartment] = original; if (nextEntry.department === draft.originalDepartment) { original.splice(draft.sourceIndex, 0, nextEntry); next[draft.originalDepartment] = original; } else next[nextEntry.department] = [...(next[nextEntry.department] || []), nextEntry]; return next; }); setExpandedEntryKey(""); }
+  async function saveInline(key) {
+    const draft = entryDrafts[key];
+    if (!draft) return;
+    const selectedVendor = cashVendors.find((v) => v.id === draft.vendorId);
+    const shouldVendor = draft.type === "expense" && draft.categoryId === "cash_purchase";
+    const categoryLabel = getCategoryOptions(categories, draft.type).find((c) => c.id === draft.categoryId)?.label || draft.categoryId;
+    const id = draft.id || `${draft.date}_${draft.department}_${Date.now()}`;
+
+    const nextEntry = {
+      id,
+      date: draft.date,
+      type: draft.type,
+      category: categoryLabel,
+      categoryId: draft.categoryId,
+      item: draft.item,
+      department: draft.department,
+      amount: Number(draft.amount || 0),
+      note: draft.note || "",
+      vendorId: shouldVendor ? draft.vendorId : "",
+      vendorName: shouldVendor ? selectedVendor?.vendorName || "" : "",
+      createdBy: draft.createdBy || currentUser.id,
+    };
+
+    await setDoc(doc(db, "dailyCash", id), {
+      ...nextEntry,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+
+    setDailyCashData((prev) => {
+      const next = { ...prev };
+      const originalDepartment = draft.originalDepartment || draft.department;
+      const original = [...(next[originalDepartment] || [])];
+      const sourceIndex = Number.isInteger(draft.sourceIndex) ? draft.sourceIndex : original.findIndex((item) => item.id === id);
+      if (sourceIndex >= 0) original.splice(sourceIndex, 1);
+      next[originalDepartment] = original;
+
+      if (nextEntry.department === originalDepartment) {
+        const insertIndex = sourceIndex >= 0 ? sourceIndex : original.length;
+        original.splice(insertIndex, 0, nextEntry);
+        next[originalDepartment] = original;
+      } else {
+        next[nextEntry.department] = [...(next[nextEntry.department] || []), nextEntry];
+      }
+      return next;
+    });
+    setExpandedEntryKey("");
+  }
   async function deleteEntry(record) { if (record.id) await deleteDoc(doc(db, "dailyCash", record.id)); setDailyCashData((prev) => ({ ...prev, [record.department]: (prev[record.department] || []).filter((_, i) => i !== record.sourceIndex) })); }
   function EntryEditor({ record }) { const key = keyOf(record); const draft = entryDrafts[key]; if (!draft) return null; const draftCats = getCategoryOptions(categories, draft.type); const draftItems = getItemOptions(categories, draft.type, draft.categoryId); const manual = draft.categoryId === "other_expense" || draft.categoryId === "other_revenue"; const showVendor = draft.type === "expense" && draft.categoryId === "cash_purchase"; return <div className="mt-4 space-y-4 rounded-3xl bg-gray-50 p-4"><div className="grid grid-cols-2 gap-3"><Field label="日期"><Input type="date" value={draft.date} onChange={(e) => updateDraft(key, "date", e.target.value)} /></Field><Field label="類型"><Select value={draft.type} onChange={(e) => updateDraft(key, "type", e.target.value)}><option value="expense">支出</option><option value="income">收入</option></Select></Field></div><Field label="細項分類"><Select value={draft.categoryId} onChange={(e) => updateDraft(key, "categoryId", e.target.value)}>{draftCats.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</Select></Field><Field label="記帳項目">{manual ? <Input value={draft.item} onChange={(e) => updateDraft(key, "item", e.target.value)} /> : <Select value={draft.item} onChange={(e) => updateDraft(key, "item", e.target.value)}>{draftItems.map((item) => <option key={item} value={item}>{item}</option>)}</Select>}</Field>{showVendor && <Field label="現結貨款廠商"><SearchableVendorSelect value={draft.vendorId} onChange={(nextVendorId) => updateDraft(key, "vendorId", nextVendorId)} vendors={cashVendors} departments={departments} placeholder="輸入現結廠商名稱或代碼搜尋" /></Field>}<Field label="歸帳部門"><Select value={draft.department} onChange={(e) => updateDraft(key, "department", e.target.value)}>{departments.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}</Select></Field><Field label="金額"><Input type="number" value={draft.amount} onChange={(e) => updateDraft(key, "amount", e.target.value)} /></Field><Field label="備註"><Input value={draft.note || ""} onChange={(e) => updateDraft(key, "note", e.target.value)} /></Field><div className="grid grid-cols-2 gap-2"><PrimaryButton type="button" onClick={() => saveInline(key)}>儲存修改</PrimaryButton><SmallButton type="button" tone="gray" className="rounded-2xl py-3" onClick={() => setExpandedEntryKey("")}>收合</SmallButton></div></div>; }
   const adminDayRecords = departments.flatMap((dept) => (dailyCashData[dept.value] || []).map((record, index) => ({ ...record, sourceIndex: index, departmentLabel: dept.label || getDepartmentLabel(dept.value, departments), department: record.department || dept.value })).filter((record) => getRecordDate(record) === adminQueryDate));
-  function DetailList({ records, showDepartment }) { if (!records.length) return <div className="p-5 text-sm font-bold text-gray-400">沒有記帳明細。</div>; return <div className="divide-y divide-gray-100">{records.map((record) => <div key={`${showDepartment ? "all" : "one"}-${record.department}-${record.sourceIndex}`} className="p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2">{showDepartment && <span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-black text-gray-500">{record.departmentLabel}</span>}<span className={`rounded-full px-2 py-1 text-xs font-black ${record.type === "income" ? "bg-[#06C755]/10 text-[#06C755]" : "bg-red-50 text-red-500"}`}>{getTypeLabel(record.type, categories)}</span><span className="text-sm font-black text-gray-950">{record.category}</span></div><p className="mt-2 text-sm font-bold text-gray-700">{record.item}</p>{record.vendorName && <p className="mt-1 text-xs font-black text-[#06C755]">廠商：{record.vendorName}</p>}<p className="mt-1 text-xs text-gray-400">{record.note || "無備註"}</p></div><div className="shrink-0 text-right"><p className={`text-base font-black ${record.type === "income" ? "text-[#06C755]" : "text-red-500"}`}>{money(record.amount)}</p><div className="mt-3 flex gap-2"><SmallButton type="button" tone="gray" onClick={() => startEdit(record)}>編輯</SmallButton><SmallButton type="button" tone="red" onClick={() => deleteEntry(record)}>刪除</SmallButton></div></div></div>{expandedEntryKey === keyOf(record) && <EntryEditor record={record} />}</div>)}</div>; }
+  function DetailList({ records, showDepartment }) { if (!records.length) return <div className="p-5 text-sm font-bold text-gray-400">沒有記帳明細。</div>; return <div className="divide-y divide-gray-100">{records.map((record) => <div key={`${showDepartment ? "all" : "one"}-${keyOf(record)}`} className="p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2">{showDepartment && <span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-black text-gray-500">{record.departmentLabel}</span>}<span className={`rounded-full px-2 py-1 text-xs font-black ${record.type === "income" ? "bg-[#06C755]/10 text-[#06C755]" : "bg-red-50 text-red-500"}`}>{getTypeLabel(record.type, categories)}</span><span className="text-sm font-black text-gray-950">{record.category}</span></div><p className="mt-2 text-sm font-bold text-gray-700">{record.item}</p>{record.vendorName && <p className="mt-1 text-xs font-black text-[#06C755]">廠商：{record.vendorName}</p>}<p className="mt-1 text-xs text-gray-400">{record.note || "無備註"}</p></div><div className="shrink-0 text-right"><p className={`text-base font-black ${record.type === "income" ? "text-[#06C755]" : "text-red-500"}`}>{money(record.amount)}</p><div className="mt-3 flex gap-2"><SmallButton type="button" tone="gray" onClick={() => startEdit(record)}>編輯</SmallButton><SmallButton type="button" tone="red" onClick={() => deleteEntry(record)}>刪除</SmallButton></div></div></div>{expandedEntryKey === keyOf(record) && <EntryEditor record={record} />}</div>)}</div>; }
   const incomeTotal = visibleRecords.filter((r) => r.type === "income").reduce((s, r) => s + Number(r.amount || 0), 0);
   const expenseTotal = visibleRecords.filter((r) => r.type === "expense").reduce((s, r) => s + Number(r.amount || 0), 0);
   const adminIncome = adminDayRecords.filter((r) => r.type === "income").reduce((s, r) => s + Number(r.amount || 0), 0);
