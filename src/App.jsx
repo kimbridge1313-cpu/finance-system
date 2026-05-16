@@ -55,7 +55,7 @@ const db = getFirestore(firebaseApp);
 const DEFAULT_DEPARTMENTS = [
   { value: "bakery", label: "烘焙部", revenueMode: "cash", commissionRate: 0 },
   { value: "supermarket", label: "超市部", revenueMode: "cash", commissionRate: 0 },
-  { value: "lottery", label: "台彩部", revenueMode: "commission", commissionRate: 6 },
+  { value: "lottery", label: "台彩部", revenueMode: "mixed_lottery", commissionRate: 6 },
 ];
 
 const ROLE_OPTIONS = [
@@ -88,7 +88,8 @@ const DEFAULT_DAILY_CATEGORIES = {
   income: {
     label: "收入",
     options: [
-      { id: "cash_revenue", label: "現金收入", items: ["門市現金", "外送現金", "市集現金"] },
+      { id: "cash_revenue", label: "現金收入", items: ["門市現金", "外送現金", "市集現金", "刮刮樂銷售額"] },
+      { id: "lottery_commission", label: "台彩佣金收入", items: ["電腦型彩券佣金", "兌獎佣金", "其他台彩佣金"] },
       { id: "transfer_revenue", label: "轉帳收入", items: ["銀行轉帳", "LINE Pay", "信用卡"] },
       { id: "other_revenue", label: "其他收入", items: [] },
     ],
@@ -152,7 +153,7 @@ function plainMoney(value) { return Number(value || 0).toLocaleString(); }
 function percent(value, base) { return base ? `${((Number(value || 0) / Number(base || 1)) * 100).toFixed(2)}%` : "0%"; }
 function getDepartmentConfig(value, departments = DEFAULT_DEPARTMENTS) { return departments.find((d) => d.value === value) || DEFAULT_DEPARTMENTS.find((d) => d.value === value) || { value, label: value, revenueMode: "cash", commissionRate: 0 }; }
 function getDepartmentLabel(value, departments = DEFAULT_DEPARTMENTS) { if (value === "all") return "全部部門"; return getDepartmentConfig(value, departments)?.label || value; }
-function getDepartmentRevenueMode(value, departments = DEFAULT_DEPARTMENTS) { const config = getDepartmentConfig(value, departments); return config.revenueMode || (value === "lottery" ? "commission" : "cash"); }
+function getDepartmentRevenueMode(value, departments = DEFAULT_DEPARTMENTS) { const config = getDepartmentConfig(value, departments); return config.revenueMode || (value === "lottery" ? "mixed_lottery" : "cash"); }
 function getDepartmentCommissionRate(value, departments = DEFAULT_DEPARTMENTS) { const config = getDepartmentConfig(value, departments); return Number(config.commissionRate || (value === "lottery" ? 6 : 0)); }
 function getRoleLabel(value) { return ROLE_OPTIONS.find((r) => r.value === value)?.label || value; }
 function getCategoryOptions(categories, type) { return categories[type]?.options || []; }
@@ -181,7 +182,7 @@ function normalizeDailyCashRecord(record) {
 function normalizeDailyCashDocs(docs, departments = DEFAULT_DEPARTMENTS) { const data = {}; departments.forEach((dept) => { data[dept.value] = []; }); docs.forEach((item) => { const normalized = normalizeDailyCashRecord(item); const dept = normalized.department || "bakery"; if (!data[dept]) data[dept] = []; data[dept].push(normalized); }); return data; }
 function normalizeFixedDocs(docs, departments = DEFAULT_DEPARTMENTS) { const data = {}; departments.forEach((dept) => { data[dept.value] = []; }); docs.forEach((item) => { if (item.department) data[item.department] = item.items || []; }); return data; }
 async function readCollection(name) { const snap = await getDocs(collection(db, name)); return snap.docs.map((item) => ({ id: item.id, ...item.data() })); }
-async function loadSettingsFromFirestore() { const [departmentDocs, vendorDocs, dailyDocs, fixedDocs, billDocs, userDocs, requestDocs, categorySnap] = await Promise.all([readCollection("departments"), readCollection("vendors"), readCollection("dailyCash"), readCollection("monthlyFixed"), readCollection("vendorBills"), readCollection("users"), readCollection("joinRequests"), getDoc(doc(db, "settings", "categories"))]); const departments = departmentDocs.length ? departmentDocs.map((entry) => ({ value: entry.value || entry.id, label: entry.label || entry.id, revenueMode: entry.revenueMode || (entry.value === "lottery" || entry.id === "lottery" ? "commission" : "cash"), commissionRate: Number(entry.commissionRate || ((entry.value === "lottery" || entry.id === "lottery") ? 6 : 0)) })) : DEFAULT_DEPARTMENTS; const categories = categorySnap.exists() ? categorySnap.data().categories || DEFAULT_DAILY_CATEGORIES : DEFAULT_DAILY_CATEGORIES; return { departments, vendors: vendorDocs, dailyCashData: normalizeDailyCashDocs(dailyDocs, departments), fixedRecords: fixedDocs, fixedData: normalizeFixedDocs(fixedDocs, departments), vendorBills: billDocs, users: userDocs, joinRequests: requestDocs, categories }; }
+async function loadSettingsFromFirestore() { const [departmentDocs, vendorDocs, dailyDocs, fixedDocs, billDocs, userDocs, requestDocs, categorySnap] = await Promise.all([readCollection("departments"), readCollection("vendors"), readCollection("dailyCash"), readCollection("monthlyFixed"), readCollection("vendorBills"), readCollection("users"), readCollection("joinRequests"), getDoc(doc(db, "settings", "categories"))]); const departments = departmentDocs.length ? departmentDocs.map((entry) => ({ value: entry.value || entry.id, label: entry.label || entry.id, revenueMode: entry.revenueMode || (entry.value === "lottery" || entry.id === "lottery" ? "mixed_lottery" : "cash"), commissionRate: Number(entry.commissionRate || ((entry.value === "lottery" || entry.id === "lottery") ? 6 : 0)) })) : DEFAULT_DEPARTMENTS; const categories = categorySnap.exists() ? categorySnap.data().categories || DEFAULT_DAILY_CATEGORIES : DEFAULT_DAILY_CATEGORIES; return { departments, vendors: vendorDocs, dailyCashData: normalizeDailyCashDocs(dailyDocs, departments), fixedRecords: fixedDocs, fixedData: normalizeFixedDocs(fixedDocs, departments), vendorBills: billDocs, users: userDocs, joinRequests: requestDocs, categories }; }
 async function loginWithLine() { if (!LIFF_ID || LIFF_ID === "請填入_LINE_LIFF_ID") throw new Error("尚未設定 LIFF ID，請先在 src/App.jsx 填入 LIFF_ID。"); await liff.init({ liffId: LIFF_ID }); if (!liff.isLoggedIn()) { liff.login(); return null; } const profile = await liff.getProfile(); const lineUserId = profile.userId; const response = await fetch(AUTH_ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lineUserId }) }); if (!response.ok) throw new Error(`登入 API 失敗：${await response.text()}`); const { token } = await response.json(); await signInWithCustomToken(auth, token); const userSnap = await getDoc(doc(db, "users", lineUserId)); return { lineUserId, profile, appUser: userSnap.exists() ? { id: lineUserId, ...userSnap.data() } : null }; }
 function LoginScreen({ authState }) {
   const [requestName, setRequestName] = useState(authState.profile?.displayName || "");
@@ -259,21 +260,27 @@ function isOperatingExpenseRecord(record) {
     categoryText.includes("其他支出")
   );
 }
+function isScratchLotteryIncome(record) {
+  const text = `${record.categoryId || ""} ${record.category || ""} ${getItemLabel(record.item)} ${record.note || ""}`;
+  return record.type === "income" && (text.includes("刮刮樂") || text.toLowerCase().includes("scratch"));
+}
+function isLotteryCommissionIncome(record) {
+  const text = `${record.categoryId || ""} ${record.category || ""} ${getItemLabel(record.item)} ${record.note || ""}`;
+  return record.type === "income" && (text.includes("佣金") || text.includes("電腦型") || text.includes("兌獎"));
+}
 function calcDepartment(department, dailyCashData, fixedData, departments, month = "", vendorBills = [], fixedRecords = []) {
   const records = (dailyCashData[department] || []).filter((item) => !month || getRecordMonth(item) === month);
   const rawIncome = records.reduce((sum, item) => item.type === "income" ? sum + Number(item.amount || 0) : sum, 0);
   const revenueMode = getDepartmentRevenueMode(department, departments);
   const commissionRate = getDepartmentCommissionRate(department, departments);
-  const commissionBase = records.reduce((sum, item) => {
-    const categoryText = `${item.categoryId || ""} ${item.category || ""}`;
-    return item.type === "income" && (categoryText.includes("cash_revenue") || categoryText.includes("現金收入")) ? sum + Number(item.amount || 0) : sum;
-  }, 0);
-  const nonCommissionIncome = records.reduce((sum, item) => {
-    const categoryText = `${item.categoryId || ""} ${item.category || ""}`;
-    return item.type === "income" && !(categoryText.includes("cash_revenue") || categoryText.includes("現金收入")) ? sum + Number(item.amount || 0) : sum;
-  }, 0);
-  const commissionRevenue = Math.round(commissionBase * commissionRate / 100);
-  const revenue = revenueMode === "commission" ? commissionRevenue + nonCommissionIncome : rawIncome;
+  const scratchSales = records.reduce((sum, item) => isScratchLotteryIncome(item) ? sum + Number(item.amount || 0) : sum, 0);
+  const scratchCommissionRevenue = Math.round(scratchSales * commissionRate / 100);
+  const keyedCommissionIncome = records.reduce((sum, item) => isLotteryCommissionIncome(item) && !isScratchLotteryIncome(item) ? sum + Number(item.amount || 0) : sum, 0);
+  const normalIncome = records.reduce((sum, item) => item.type === "income" && !isScratchLotteryIncome(item) && !isLotteryCommissionIncome(item) ? sum + Number(item.amount || 0) : sum, 0);
+  const commissionBase = scratchSales;
+  const commissionRevenue = scratchCommissionRevenue;
+  const nonCommissionIncome = keyedCommissionIncome + normalIncome;
+  const revenue = revenueMode === "mixed_lottery" ? scratchCommissionRevenue + keyedCommissionIncome + normalIncome : revenueMode === "commission" ? Math.round(rawIncome * commissionRate / 100) : rawIncome;
   const operatingDailyExpense = records.reduce((sum, item) => isOperatingExpenseRecord(item) ? sum + Number(item.amount || 0) : sum, 0);
   const dailyCost = records.reduce((sum, item) => isCostRecord(item) ? sum + Number(item.amount || 0) : sum, 0);
   const monthlyPurchase = vendorBills
@@ -292,6 +299,10 @@ function calcDepartment(department, dailyCashData, fixedData, departments, month
     revenueMode,
     commissionRate,
     commissionBase,
+    scratchSales,
+    scratchCommissionRevenue,
+    keyedCommissionIncome,
+    normalIncome,
     commissionRevenue,
     nonCommissionIncome,
     businessCost,
@@ -336,7 +347,12 @@ function buildProfitReportRows(department, dailyCashData, fixedData, departments
   const tax = Math.max(Math.round(beforeTax * 0.05), 0);
   const rows = [{ kind: "section", name: "營業收入(A)", amount: summary.revenue, percent: "100%" }];
 
-  if (summary.revenueMode === "commission") {
+  if (summary.revenueMode === "mixed_lottery") {
+    rows.push({ kind: "category", name: `刮刮樂佣金收入（銷售額 × ${summary.commissionRate}%）`, amount: summary.scratchCommissionRevenue, percent: percent(summary.scratchCommissionRevenue, summary.revenue) });
+    rows.push({ kind: "item", name: "刮刮樂銷售額（不全額列為收入）", amount: summary.scratchSales, percent: "" });
+    if (summary.keyedCommissionIncome > 0) rows.push({ kind: "category", name: "電腦型 / 機台佣金收入", amount: summary.keyedCommissionIncome, percent: percent(summary.keyedCommissionIncome, summary.revenue) });
+    if (summary.normalIncome > 0) rows.push({ kind: "category", name: "其他收入", amount: summary.normalIncome, percent: percent(summary.normalIncome, summary.revenue) });
+  } else if (summary.revenueMode === "commission") {
     rows.push({ kind: "category", name: `佣金收入（代收金額 × ${summary.commissionRate}%）`, amount: summary.commissionRevenue, percent: percent(summary.commissionRevenue, summary.revenue) });
     rows.push({ kind: "item", name: "代收現金 / 銷售額（不列為收入）", amount: summary.commissionBase, percent: "" });
     if (summary.nonCommissionIncome > 0) rows.push({ kind: "category", name: "其他收入", amount: summary.nonCommissionIncome, percent: percent(summary.nonCommissionIncome, summary.revenue) });
@@ -951,29 +967,7 @@ function AccountingSettings({ categories, setCategories, departments = DEFAULT_D
 
   return <div className="space-y-5"><div className="grid grid-cols-2 rounded-2xl bg-gray-50 p-1"><button type="button" onClick={() => setType("expense")} className={`rounded-xl px-4 py-3 font-black ${type === "expense" ? "bg-red-500 text-white" : "text-red-500"}`}>支出分類</button><button type="button" onClick={() => setType("income")} className={`rounded-xl px-4 py-3 font-black ${type === "income" ? "bg-[#06C755] text-white" : "text-[#06C755]"}`}>收入分類</button></div><div className="grid grid-cols-[1fr_84px] gap-2"><Input value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder="新增細項分類" /><SmallButton type="button" onClick={addCategory}>新增</SmallButton></div><p className="text-xs font-bold leading-5 text-gray-400">可為分類或記帳項目設定歸帳部門。每日記帳選到該分類 / 項目時，歸帳部門會自動連動；未設定則維持手動選擇。</p>{options.map((cat) => { const itemObjects = normalizeAccountingItems(cat.items || []); return <div key={cat.id} className="rounded-3xl border border-gray-100 p-4"><div className="grid grid-cols-[1fr_44px] gap-2"><Input value={cat.label} onChange={(e) => updateCategory(cat.id, "label", e.target.value)} /><button type="button" onClick={() => deleteCategory(cat.id)} className="rounded-2xl bg-red-50 text-red-500">×</button></div><div className="mt-3"><Field label="分類預設歸帳部門"><Select value={cat.department || ""} onChange={(e) => updateCategory(cat.id, "department", e.target.value)}><option value="">未設定，手動選擇</option>{departments.map((dept) => <option key={dept.value} value={dept.value}>{dept.label}</option>)}</Select></Field></div><div className="mt-4 space-y-2">{itemObjects.map((item, i) => <div key={`${cat.id}_${i}`} className="rounded-2xl bg-gray-50 p-3"><div className="grid grid-cols-[1fr_40px] gap-2"><Input value={item.label} onChange={(e) => updateItem(cat.id, i, "label", e.target.value)} /><button type="button" onClick={() => deleteItem(cat.id, i)} className="rounded-2xl bg-red-50 text-red-500">×</button></div><div className="mt-2"><Field label="此項目歸帳部門"><Select value={item.department || ""} onChange={(e) => updateItem(cat.id, i, "department", e.target.value)}><option value="">未設定，跟隨分類或手動</option>{departments.map((dept) => <option key={dept.value} value={dept.value}>{dept.label}</option>)}</Select></Field></div></div>)}<div className="rounded-2xl border border-dashed border-gray-200 p-3"><Input value={newItems[cat.id] || ""} onChange={(e) => setNewItems((p) => ({ ...p, [cat.id]: e.target.value }))} placeholder="新增記帳項目" /><div className="mt-2 grid grid-cols-[1fr_84px] gap-2"><Select value={newItemDepartments[cat.id] || ""} onChange={(e) => setNewItemDepartments((p) => ({ ...p, [cat.id]: e.target.value }))}><option value="">未設定部門</option>{departments.map((dept) => <option key={dept.value} value={dept.value}>{dept.label}</option>)}</Select><SmallButton type="button" onClick={() => addItem(cat.id)}>新增</SmallButton></div></div></div></div>; })}</div>;
 }
-function DepartmentSettings({ departments, setDepartments, setDailyCashData, setFixedData }) {
-  const [name, setName] = useState("");
-
-  async function add() {
-    if (!name.trim()) return;
-    const value = name.trim().toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "") || `department_${Date.now()}`;
-    const record = { value, label: name.trim(), revenueMode: "cash", commissionRate: 0 };
-    await setDoc(doc(db, "departments", value), record, { merge: true });
-    setDepartments((p) => [...p, record]);
-    setDailyCashData((p) => ({ ...p, [value]: [] }));
-    setFixedData((p) => ({ ...p, [value]: [] }));
-    setName("");
-  }
-
-  async function updateDepartment(index, field, value) {
-    const nextDepartments = departments.map((dept, deptIndex) => deptIndex === index ? { ...dept, [field]: field === "commissionRate" ? Number(value || 0) : value } : dept);
-    setDepartments(nextDepartments);
-    const target = nextDepartments[index];
-    if (target?.value) await setDoc(doc(db, "departments", target.value), target, { merge: true });
-  }
-
-  return <div className="space-y-4"><div className="grid grid-cols-[1fr_84px] gap-2"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="新增部門" /><SmallButton type="button" onClick={add}>新增</SmallButton></div>{departments.map((d, i) => <div key={d.value} className="space-y-3 rounded-3xl border border-gray-100 p-4"><Field label="部門名稱"><Input value={d.label} onChange={(e) => updateDepartment(i, "label", e.target.value)} /></Field><Field label="部門代碼"><Input value={d.value} onChange={(e) => updateDepartment(i, "value", e.target.value)} /></Field><Field label="收入計算方式"><Select value={d.revenueMode || (d.value === "lottery" ? "commission" : "cash")} onChange={(e) => updateDepartment(i, "revenueMode", e.target.value)}><option value="cash">現金 / 入帳金額 = 營業收入</option><option value="commission">佣金制：代收金額 × 佣金率 = 營業收入</option></Select></Field>{(d.revenueMode || (d.value === "lottery" ? "commission" : "cash")) === "commission" && <Field label="佣金率 %"><Input type="number" value={d.commissionRate ?? 6} onChange={(e) => updateDepartment(i, "commissionRate", e.target.value)} placeholder="例如 6" /></Field>}</div>)}</div>;
-}
+function DepartmentSettings({ departments, setDepartments, setDailyCashData, setFixedData }) { const [name, setName] = useState(""); function add() { if (!name.trim()) return; const value = name.trim().toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "") || `department_${Date.now()}`; setDepartments((p) => [...p, { value, label: name.trim() }]); setDailyCashData((p) => ({ ...p, [value]: [] })); setFixedData((p) => ({ ...p, [value]: [] })); setName(""); } return <div className="space-y-4"><div className="grid grid-cols-[1fr_84px] gap-2"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="新增部門" /><SmallButton type="button" onClick={add}>新增</SmallButton></div>{departments.map((d, i) => <div key={d.value} className="rounded-3xl border border-gray-100 p-4"><Field label="部門名稱"><Input value={d.label} onChange={(e) => setDepartments((p) => p.map((x, idx) => idx === i ? { ...x, label: e.target.value } : x))} /></Field><Field label="部門代碼"><Input value={d.value} onChange={(e) => setDepartments((p) => p.map((x, idx) => idx === i ? { ...x, value: e.target.value } : x))} /></Field></div>)}</div>; }
 function VendorManagement({ vendors, setVendors, departments }) {
   const empty = { vendorCode: "", vendorName: "", type: "cash", department: departments[0]?.value || "bakery", deductRule: "" };
   const [form, setForm] = useState(empty);
