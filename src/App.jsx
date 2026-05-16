@@ -271,9 +271,17 @@ function formatDateDisplayValue(type, value) {
 }
 function Input(props) {
   const { className = "", type, value, onChange, ...rest } = props;
+
   if (type === "date" || type === "month") {
-    return <div className={`relative block min-w-0 max-w-full box-border w-full overflow-hidden rounded-2xl border border-gray-200 bg-white px-4 py-3 text-center text-[15px] leading-6 outline-none transition focus-within:border-[#06C755] focus-within:ring-4 focus-within:ring-[#06C755]/10 ${className}`}><span className="pointer-events-none block truncate text-gray-950">{formatDateDisplayValue(type, value)}</span><input {...rest} type={type} value={value || ""} onChange={onChange} className="absolute inset-0 block h-full w-full min-w-0 max-w-full cursor-pointer opacity-0" style={{ WebkitAppearance: "none", appearance: "none" }} /></div>;
+    return <>
+      <div className={`relative block min-w-0 max-w-full box-border w-full overflow-hidden rounded-2xl border border-gray-200 bg-white px-4 py-3 text-center text-[15px] leading-6 outline-none transition focus-within:border-[#06C755] focus-within:ring-4 focus-within:ring-[#06C755]/10 sm:hidden ${className}`}>
+        <span className="pointer-events-none block truncate text-gray-950">{formatDateDisplayValue(type, value)}</span>
+        <input {...rest} type={type} value={value || ""} onChange={onChange} className="absolute inset-0 block h-full w-full min-w-0 max-w-full cursor-pointer opacity-0" />
+      </div>
+      <input {...rest} type={type} value={value || ""} onChange={onChange} className={`hidden min-w-0 max-w-full box-border w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-[15px] outline-none transition focus:border-[#06C755] focus:ring-4 focus:ring-[#06C755]/10 sm:block ${className}`} />
+    </>;
   }
+
   return <input {...rest} type={type} value={value} onChange={onChange} className={`block min-w-0 max-w-full box-border w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-[15px] outline-none transition focus:border-[#06C755] focus:ring-4 focus:ring-[#06C755]/10 ${className}`} />;
 }
 function TextArea(props) { const { className = "", ...rest } = props; return <textarea {...rest} className={`block min-w-0 max-w-full box-border w-full resize-none rounded-2xl border border-gray-200 bg-white px-4 py-3 text-[15px] outline-none transition focus:border-[#06C755] focus:ring-4 focus:ring-[#06C755]/10 ${className}`} />; }
