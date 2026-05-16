@@ -341,20 +341,180 @@ function DailyCash({ currentUser, isAdmin, categories, departments, dailyCashDat
 }
 
 function MonthlyFixed({ departments, fixedData, setFixedData, fixedRecords, setFixedRecords }) {
-  const [month, setMonth] = useState("2026-05");
-  const [department, setDepartment] = useState(departments[0]?.value || "bakery");
-  const [items, setItems] = useState(fixedData[departments[0]?.value || "bakery"] || []);
+  const defaultDepartment = departments[0]?.value || "bakery";
+  const defaultOperatingItems = ["租金", "水電瓦斯", "設備維修", "網路電話", "廣告行銷"];
+  const defaultPersonnelItems = ["正職薪資", "兼職薪資", "加班費", "獎金", "勞健保"];
+
+  const [month, setMonth] = useState(() => getTodayDate().slice(0, 7));
+  const [department, setDepartment] = useState(defaultDepartment);
+  const [operatingItems, setOperatingItems] = useState(defaultOperatingItems.map((label) => ({ label, amount: "" })));
+  const [personnelItems, setPersonnelItems] = useState(defaultPersonnelItems.map((label) => ({ label, amount: "" })));
   const [expandedId, setExpandedId] = useState("");
   const [drafts, setDrafts] = useState({});
-  function saveRecord() { const clean = items.filter((i) => String(i.label || "").trim()).map((i) => ({ label: i.label, amount: Number(i.amount || 0) })); const id = `fixed_${month}_${department}`; const record = { id, month, department, items: clean }; setFixedRecords((prev) => prev.some((r) => r.id === id) ? prev.map((r) => r.id === id ? record : r) : [record, ...prev]); setFixedData((prev) => ({ ...prev, [department]: clean })); }
-  function loadRecord(m, d) { const record = fixedRecords.find((r) => r.month === m && r.department === d); setItems(record ? record.items.map((x) => ({ ...x })) : []); }
-  function startEdit(record) { setExpandedId(record.id); setDrafts((prev) => ({ ...prev, [record.id]: { ...record, items: record.items.map((i) => ({ ...i })) } })); }
-  function updateDraft(id, field, value) { setDrafts((prev) => ({ ...prev, [id]: { ...(prev[id] || {}), [field]: value } })); }
-  function updateDraftItem(id, index, field, value) { setDrafts((prev) => ({ ...prev, [id]: { ...prev[id], items: prev[id].items.map((item, i) => i === index ? { ...item, [field]: value } : item) } })); }
-  function saveInline(id) { const draft = drafts[id]; const clean = draft.items.filter((i) => String(i.label || "").trim()).map((i) => ({ label: i.label, amount: Number(i.amount || 0) })); const next = { ...draft, items: clean }; setFixedRecords((prev) => prev.map((r) => r.id === id ? next : r)); setFixedData((prev) => ({ ...prev, [next.department]: clean })); setExpandedId(""); }
-  function deleteRecord(id) { const target = fixedRecords.find((r) => r.id === id); setFixedRecords((prev) => prev.filter((r) => r.id !== id)); if (target) setFixedData((prev) => ({ ...prev, [target.department]: [] })); }
-  const total = items.reduce((s, i) => s + Number(i.amount || 0), 0);
-  return <div className="space-y-5"><PageHeader title="月固定支出" subtitle="每月儲存後保留紀錄，可直接展開修改。" icon={ICONS.settings} /><Card className="space-y-4"><Field label="月份"><Input type="month" value={month} onChange={(e) => { setMonth(e.target.value); loadRecord(e.target.value, department); }} /></Field><Field label="部門"><Select value={department} onChange={(e) => { setDepartment(e.target.value); loadRecord(month, e.target.value); }}>{departments.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}</Select></Field></Card><Card className="overflow-hidden p-0"><div className="bg-slate-800 px-4 py-3 text-center text-lg font-black text-white">{month} {getDepartmentLabel(department, departments)} 固定支出設定</div><div className="divide-y divide-gray-100">{items.map((item, index) => <div key={index} className="grid grid-cols-[1fr_120px_48px] items-center gap-2 px-4 py-3"><Input value={item.label} onChange={(e) => setItems((prev) => prev.map((x, i) => i === index ? { ...x, label: e.target.value } : x))} /><Input type="number" value={item.amount} onChange={(e) => setItems((prev) => prev.map((x, i) => i === index ? { ...x, amount: e.target.value } : x))} className="text-right" /><button type="button" onClick={() => setItems((prev) => prev.filter((_, i) => i !== index))} className="h-10 rounded-xl bg-red-50 text-red-500">×</button></div>)}</div><div className="grid grid-cols-[1fr_120px_48px] bg-green-100 px-4 py-3 font-black"><div>合計</div><div className="text-right">{plainMoney(total)}</div><div /></div></Card><div className="grid grid-cols-2 gap-3"><SmallButton type="button" onClick={() => setItems((prev) => [...prev, { label: "", amount: "" }])} className="rounded-2xl py-3">新增費用</SmallButton><PrimaryButton type="button" onClick={saveRecord}>儲存設定</PrimaryButton></div><Card className="overflow-hidden p-0"><div className="border-b border-gray-100 p-5"><h2 className="font-black text-gray-950">固定支出紀錄</h2></div><div className="divide-y divide-gray-100">{fixedRecords.map((record) => { const total = record.items.reduce((s, i) => s + Number(i.amount || 0), 0); const draft = drafts[record.id]; return <div key={record.id} className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="flex gap-2"><span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-black text-gray-500">{record.month}</span><span className="font-black text-gray-950">{getDepartmentLabel(record.department, departments)}</span></div><p className="mt-2 text-xs font-bold text-gray-400">{record.items.length} 個項目｜合計 {money(total)}</p></div><div className="flex gap-2"><SmallButton type="button" tone="gray" onClick={() => startEdit(record)}>編輯</SmallButton><SmallButton type="button" tone="red" onClick={() => deleteRecord(record.id)}>刪除</SmallButton></div></div>{expandedId === record.id && draft && <div className="mt-4 space-y-3 rounded-3xl bg-gray-50 p-4"><div className="grid grid-cols-2 gap-3"><Field label="月份"><Input type="month" value={draft.month} onChange={(e) => updateDraft(record.id, "month", e.target.value)} /></Field><Field label="部門"><Select value={draft.department} onChange={(e) => updateDraft(record.id, "department", e.target.value)}>{departments.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}</Select></Field></div>{draft.items.map((item, i) => <div key={i} className="grid grid-cols-[1fr_104px_40px] gap-2"><Input value={item.label} onChange={(e) => updateDraftItem(record.id, i, "label", e.target.value)} /><Input type="number" value={item.amount} onChange={(e) => updateDraftItem(record.id, i, "amount", e.target.value)} /><button type="button" onClick={() => updateDraft(record.id, "items", draft.items.filter((_, idx) => idx !== i))} className="rounded-2xl bg-red-50 text-red-500">×</button></div>)}<div className="grid grid-cols-3 gap-2"><SmallButton type="button" onClick={() => updateDraft(record.id, "items", [...draft.items, { label: "", amount: "" }])}>新增</SmallButton><PrimaryButton type="button" onClick={() => saveInline(record.id)}>儲存</PrimaryButton><SmallButton type="button" tone="gray" onClick={() => setExpandedId("")}>收合</SmallButton></div></div>}</div>; })}</div></Card></div>;
+
+  function normalizeFixedRecordItems(record) {
+    if (!record) {
+      return {
+        operatingItems: operatingItems.map((item) => ({ label: item.label, amount: "" })),
+        personnelItems: personnelItems.map((item) => ({ label: item.label, amount: "" })),
+      };
+    }
+
+    if (record.operatingItems || record.personnelItems) {
+      return {
+        operatingItems: (record.operatingItems || []).map((item) => ({ ...item, amount: String(item.amount ?? "") })),
+        personnelItems: (record.personnelItems || []).map((item) => ({ ...item, amount: String(item.amount ?? "") })),
+      };
+    }
+
+    return {
+      operatingItems: (record.items || []).map((item) => ({ ...item, amount: String(item.amount ?? "") })),
+      personnelItems: [],
+    };
+  }
+
+  function cleanItems(items) {
+    return items
+      .filter((item) => String(item.label || "").trim())
+      .map((item) => ({ label: String(item.label || "").trim(), amount: Number(item.amount || 0) }));
+  }
+
+  function combineItems(operating, personnel) {
+    return [...cleanItems(operating), ...cleanItems(personnel)];
+  }
+
+  function loadRecord(nextMonth, nextDepartment) {
+    const record = fixedRecords.find((entry) => entry.month === nextMonth && entry.department === nextDepartment);
+    const normalized = normalizeFixedRecordItems(record);
+    setOperatingItems(normalized.operatingItems.length ? normalized.operatingItems : defaultOperatingItems.map((label) => ({ label, amount: "" })));
+    setPersonnelItems(normalized.personnelItems.length ? normalized.personnelItems : defaultPersonnelItems.map((label) => ({ label, amount: "" })));
+  }
+
+  function updateSectionItem(section, index, field, value) {
+    const setter = section === "operating" ? setOperatingItems : setPersonnelItems;
+    setter((prev) => prev.map((item, itemIndex) => (itemIndex === index ? { ...item, [field]: value } : item)));
+  }
+
+  function addSectionItem(section) {
+    const setter = section === "operating" ? setOperatingItems : setPersonnelItems;
+    setter((prev) => [...prev, { label: "", amount: "" }]);
+  }
+
+  function deleteSectionItem(section, index) {
+    const setter = section === "operating" ? setOperatingItems : setPersonnelItems;
+    setter((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
+  }
+
+  async function saveRecord() {
+    const id = `fixed_${month}_${department}`;
+    const cleanOperating = cleanItems(operatingItems);
+    const cleanPersonnel = cleanItems(personnelItems);
+    const record = {
+      id,
+      month,
+      department,
+      operatingItems: cleanOperating,
+      personnelItems: cleanPersonnel,
+      items: [...cleanOperating, ...cleanPersonnel],
+      updatedAt: serverTimestamp(),
+    };
+    await setDoc(doc(db, "monthlyFixed", id), record, { merge: true });
+    setFixedRecords((prev) => (prev.some((entry) => entry.id === id) ? prev.map((entry) => (entry.id === id ? record : entry)) : [record, ...prev]));
+    setFixedData((prev) => ({ ...prev, [department]: record.items }));
+  }
+
+  function startEdit(record) {
+    const normalized = normalizeFixedRecordItems(record);
+    setExpandedId(record.id);
+    setDrafts((prev) => ({
+      ...prev,
+      [record.id]: {
+        ...record,
+        operatingItems: normalized.operatingItems,
+        personnelItems: normalized.personnelItems,
+      },
+    }));
+  }
+
+  function updateDraft(recordId, field, value) {
+    setDrafts((prev) => ({ ...prev, [recordId]: { ...(prev[recordId] || {}), [field]: value } }));
+  }
+
+  function updateDraftSectionItem(recordId, section, index, field, value) {
+    const fieldName = section === "operating" ? "operatingItems" : "personnelItems";
+    setDrafts((prev) => {
+      const draft = prev[recordId];
+      if (!draft) return prev;
+      return {
+        ...prev,
+        [recordId]: {
+          ...draft,
+          [fieldName]: (draft[fieldName] || []).map((item, itemIndex) => (itemIndex === index ? { ...item, [field]: value } : item)),
+        },
+      };
+    });
+  }
+
+  function addDraftSectionItem(recordId, section) {
+    const fieldName = section === "operating" ? "operatingItems" : "personnelItems";
+    setDrafts((prev) => {
+      const draft = prev[recordId];
+      if (!draft) return prev;
+      return { ...prev, [recordId]: { ...draft, [fieldName]: [...(draft[fieldName] || []), { label: "", amount: "" }] } };
+    });
+  }
+
+  function deleteDraftSectionItem(recordId, section, index) {
+    const fieldName = section === "operating" ? "operatingItems" : "personnelItems";
+    setDrafts((prev) => {
+      const draft = prev[recordId];
+      if (!draft) return prev;
+      return { ...prev, [recordId]: { ...draft, [fieldName]: (draft[fieldName] || []).filter((_, itemIndex) => itemIndex !== index) } };
+    });
+  }
+
+  async function saveInline(recordId) {
+    const draft = drafts[recordId];
+    if (!draft) return;
+    const cleanOperating = cleanItems(draft.operatingItems || []);
+    const cleanPersonnel = cleanItems(draft.personnelItems || []);
+    const nextRecord = {
+      ...draft,
+      operatingItems: cleanOperating,
+      personnelItems: cleanPersonnel,
+      items: [...cleanOperating, ...cleanPersonnel],
+      updatedAt: serverTimestamp(),
+    };
+    await setDoc(doc(db, "monthlyFixed", recordId), nextRecord, { merge: true });
+    setFixedRecords((prev) => prev.map((entry) => (entry.id === recordId ? nextRecord : entry)));
+    setFixedData((prev) => ({ ...prev, [nextRecord.department]: nextRecord.items }));
+    setExpandedId("");
+  }
+
+  async function deleteRecord(id) {
+    const target = fixedRecords.find((entry) => entry.id === id);
+    await deleteDoc(doc(db, "monthlyFixed", id));
+    setFixedRecords((prev) => prev.filter((entry) => entry.id !== id));
+    if (target) setFixedData((prev) => ({ ...prev, [target.department]: [] }));
+  }
+
+  function totalOf(items) {
+    return items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  }
+
+  function SectionEditor({ title, subtitle, section, items }) {
+    return <div className="rounded-[24px] border border-gray-100 p-4"><div className="mb-3"><h3 className="font-black text-gray-950">{title}</h3><p className="mt-1 text-xs font-bold text-gray-400">{subtitle}</p></div><div className="space-y-2">{items.map((item, index) => <div key={`${section}_${index}`} className="grid grid-cols-[1fr_112px_40px] gap-2"><Input value={item.label} onChange={(event) => updateSectionItem(section, index, "label", event.target.value)} placeholder="項目名稱" /><Input type="number" value={item.amount} onChange={(event) => updateSectionItem(section, index, "amount", event.target.value)} placeholder="金額" className="text-right" /><button type="button" onClick={() => deleteSectionItem(section, index)} className="rounded-2xl bg-red-50 text-red-500">×</button></div>)}</div><div className="mt-3 flex items-center justify-between gap-3"><SmallButton type="button" onClick={() => addSectionItem(section)}>新增項目</SmallButton><span className="text-sm font-black text-gray-500">小計 {money(totalOf(items))}</span></div></div>;
+  }
+
+  function DraftSectionEditor({ recordId, title, subtitle, section, items }) {
+    return <div className="rounded-[24px] bg-white p-4"><div className="mb-3"><h3 className="font-black text-gray-950">{title}</h3><p className="mt-1 text-xs font-bold text-gray-400">{subtitle}</p></div><div className="space-y-2">{(items || []).map((item, index) => <div key={`${recordId}_${section}_${index}`} className="grid grid-cols-[1fr_112px_40px] gap-2"><Input value={item.label} onChange={(event) => updateDraftSectionItem(recordId, section, index, "label", event.target.value)} placeholder="項目名稱" /><Input type="number" value={item.amount} onChange={(event) => updateDraftSectionItem(recordId, section, index, "amount", event.target.value)} placeholder="金額" className="text-right" /><button type="button" onClick={() => deleteDraftSectionItem(recordId, section, index)} className="rounded-2xl bg-red-50 text-red-500">×</button></div>)}</div><div className="mt-3 flex items-center justify-between gap-3"><SmallButton type="button" onClick={() => addDraftSectionItem(recordId, section)}>新增項目</SmallButton><span className="text-sm font-black text-gray-500">小計 {money(totalOf(items || []))}</span></div></div>;
+  }
+
+  const operatingTotal = totalOf(operatingItems);
+  const personnelTotal = totalOf(personnelItems);
+  const grandTotal = operatingTotal + personnelTotal;
+
+  return <div className="space-y-5"><PageHeader title="月固定支出" subtitle="分為營業支出與人事費用。每月會沿用設定項目，只需填入當月金額。" icon={ICONS.settings} /><Card className="space-y-4"><Field label="月份"><Input type="month" value={month} onChange={(event) => { setMonth(event.target.value); loadRecord(event.target.value, department); }} /></Field><Field label="部門"><Select value={department} onChange={(event) => { setDepartment(event.target.value); loadRecord(month, event.target.value); }}>{departments.map((entry) => <option key={entry.value} value={entry.value}>{entry.label}</option>)}</Select></Field><p className="rounded-2xl bg-[#06C755]/10 p-3 text-xs font-bold leading-5 text-[#06C755]">初期可先設定固定項目；下個月若尚未有紀錄，系統會帶出相同項目，金額可重新填寫。</p></Card><Card className="space-y-4"><div className="rounded-2xl bg-slate-800 px-4 py-3 text-center text-lg font-black text-white">{month} {getDepartmentLabel(department, departments)} 固定支出</div><SectionEditor title="營業支出" subtitle="租金、水電、設備、維修、廣告等營運相關費用" section="operating" items={operatingItems} /><SectionEditor title="人事費用" subtitle="薪資、加班、獎金、勞健保等人員相關費用" section="personnel" items={personnelItems} /><div className="rounded-2xl bg-green-100 p-4 font-black text-gray-950"><div className="flex justify-between"><span>營業支出</span><span>{money(operatingTotal)}</span></div><div className="mt-2 flex justify-between"><span>人事費用</span><span>{money(personnelTotal)}</span></div><div className="mt-3 border-t border-green-200 pt-3 flex justify-between text-lg"><span>合計</span><span>{money(grandTotal)}</span></div></div><PrimaryButton type="button" onClick={saveRecord}>儲存本月固定支出</PrimaryButton></Card><Card className="overflow-hidden p-0"><div className="border-b border-gray-100 p-5"><h2 className="font-black text-gray-950">固定支出紀錄</h2></div><div className="divide-y divide-gray-100">{fixedRecords.map((record) => { const normalized = normalizeFixedRecordItems(record); const operatingTotal = totalOf(normalized.operatingItems); const personnelTotal = totalOf(normalized.personnelItems); const total = operatingTotal + personnelTotal; const draft = drafts[record.id]; return <div key={record.id} className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="flex flex-wrap gap-2"><span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-black text-gray-500">{record.month}</span><span className="font-black text-gray-950">{getDepartmentLabel(record.department, departments)}</span></div><p className="mt-2 text-xs font-bold text-gray-400">營業 {money(operatingTotal)}｜人事 {money(personnelTotal)}｜合計 {money(total)}</p></div><div className="flex gap-2"><SmallButton type="button" tone="gray" onClick={() => startEdit(record)}>編輯</SmallButton><SmallButton type="button" tone="red" onClick={() => deleteRecord(record.id)}>刪除</SmallButton></div></div>{expandedId === record.id && draft && <div className="mt-4 space-y-3 rounded-3xl bg-gray-50 p-4"><div className="grid grid-cols-2 gap-3"><Field label="月份"><Input type="month" value={draft.month} onChange={(event) => updateDraft(record.id, "month", event.target.value)} /></Field><Field label="部門"><Select value={draft.department} onChange={(event) => updateDraft(record.id, "department", event.target.value)}>{departments.map((entry) => <option key={entry.value} value={entry.value}>{entry.label}</option>)}</Select></Field></div><DraftSectionEditor recordId={record.id} title="營業支出" subtitle="可修改項目與金額" section="operating" items={draft.operatingItems || []} /><DraftSectionEditor recordId={record.id} title="人事費用" subtitle="可修改項目與金額" section="personnel" items={draft.personnelItems || []} /><div className="grid grid-cols-2 gap-2"><PrimaryButton type="button" onClick={() => saveInline(record.id)}>儲存修改</PrimaryButton><SmallButton type="button" tone="gray" className="rounded-2xl py-3" onClick={() => setExpandedId("")}>收合</SmallButton></div></div>}</div>; })}</div></Card></div>;
 }
 
 function ProfitReportTable({ title, rows, onExportCsv }) { const rowClass = (kind) => kind === "final" ? "bg-orange-100 font-black" : kind === "section" ? "bg-green-100 font-black" : kind === "category" ? "bg-white font-black text-sky-700" : "bg-white text-gray-600"; return <Card className="overflow-hidden p-0"><div className="bg-slate-800 px-4 py-3 text-white"><h2 className="text-center text-base font-black">{title}</h2><button type="button" onClick={onExportCsv} className="mt-3 w-full rounded-2xl bg-white/15 px-3 py-2 text-xs font-black">輸出 CSV</button></div><div className="divide-y divide-gray-100 md:hidden">{rows.map((row, i) => <div key={i} className={`px-4 py-3 ${rowClass(row.kind)}`}><div className="flex justify-between gap-3"><div className={row.kind === "item" ? "pl-4 text-sm" : "text-sm"}>{row.kind === "item" ? `- ${row.name}` : row.name}</div><div className="text-right"><div className="font-black">{plainMoney(row.amount)}</div><div className="text-xs text-gray-500">{row.percent}</div></div></div></div>)}</div><div className="hidden overflow-x-auto md:block"><table className="w-full text-sm"><tbody>{rows.map((row, i) => <tr key={i} className={rowClass(row.kind)}><td className="border px-2 py-2">{row.kind === "item" ? `- ${row.name}` : row.name}</td><td className="border px-2 py-2 text-right">{plainMoney(row.amount)}</td><td className="border px-2 py-2 text-right">{row.percent}</td></tr>)}</tbody></table></div></Card>; }
