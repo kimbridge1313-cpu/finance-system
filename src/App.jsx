@@ -45,7 +45,7 @@ const firebaseConfig = {
 };
 
 // TODO：請把這裡改成你 LINE Developers 取得的 LIFF ID。
-const LIFF_ID = "2010101193-M9eYhgFD";
+const LIFF_ID = "請填入_LINE_LIFF_ID";
 const AUTH_ENDPOINT = "/api/auth";
 
 const firebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
@@ -156,7 +156,32 @@ function getDepartmentLabel(value, departments = DEFAULT_DEPARTMENTS) { if (valu
 function getDepartmentRevenueMode(value, departments = DEFAULT_DEPARTMENTS) { const config = getDepartmentConfig(value, departments); return config.revenueMode || (value === "lottery" ? "mixed_lottery" : "cash"); }
 function getDepartmentCommissionRate(value, departments = DEFAULT_DEPARTMENTS) { const config = getDepartmentConfig(value, departments); return Number(config.commissionRate || (value === "lottery" ? 6 : 0)); }
 function getRoleLabel(value) { return ROLE_OPTIONS.find((r) => r.value === value)?.label || value; }
-function getCategoryOptions(categories, type) { return categories[type]?.options || []; }
+function mergeRequiredCategories(savedCategories) {
+  const required = DEFAULT_DAILY_CATEGORIES;
+  const merged = {
+    expense: {
+      ...(savedCategories?.expense || {}),
+      label: savedCategories?.expense?.label || required.expense.label,
+      options: [...(savedCategories?.expense?.options || [])],
+    },
+    income: {
+      ...(savedCategories?.income || {}),
+      label: savedCategories?.income?.label || required.income.label,
+      options: [...(savedCategories?.income?.options || [])],
+    },
+  };
+
+  ["expense", "income"].forEach((type) => {
+    const existingOptions = merged[type].options || [];
+    const missingRequiredOptions = (required[type].options || []).filter((requiredOption) => {
+      return !existingOptions.some((option) => option.id === requiredOption.id);
+    });
+    merged[type].options = [...missingRequiredOptions, ...existingOptions];
+  });
+
+  return merged;
+}
+function getCategoryOptions(categories, type) { return mergeRequiredCategories(categories)[type]?.options || []; }
 function getItemLabel(item) { return typeof item === "string" ? item : item?.label || ""; }
 function getItemDepartment(item) { return typeof item === "string" ? "" : item?.department || ""; }
 function normalizeAccountingItems(items = []) { return items.map((item) => (typeof item === "string" ? { label: item, department: "" } : { label: item.label || "", department: item.department || "" })); }
@@ -182,7 +207,7 @@ function normalizeDailyCashRecord(record) {
 function normalizeDailyCashDocs(docs, departments = DEFAULT_DEPARTMENTS) { const data = {}; departments.forEach((dept) => { data[dept.value] = []; }); docs.forEach((item) => { const normalized = normalizeDailyCashRecord(item); const dept = normalized.department || "bakery"; if (!data[dept]) data[dept] = []; data[dept].push(normalized); }); return data; }
 function normalizeFixedDocs(docs, departments = DEFAULT_DEPARTMENTS) { const data = {}; departments.forEach((dept) => { data[dept.value] = []; }); docs.forEach((item) => { if (item.department) data[item.department] = item.items || []; }); return data; }
 async function readCollection(name) { const snap = await getDocs(collection(db, name)); return snap.docs.map((item) => ({ id: item.id, ...item.data() })); }
-async function loadSettingsFromFirestore() { const [departmentDocs, vendorDocs, dailyDocs, fixedDocs, billDocs, userDocs, requestDocs, categorySnap] = await Promise.all([readCollection("departments"), readCollection("vendors"), readCollection("dailyCash"), readCollection("monthlyFixed"), readCollection("vendorBills"), readCollection("users"), readCollection("joinRequests"), getDoc(doc(db, "settings", "categories"))]); const departments = departmentDocs.length ? departmentDocs.map((entry) => ({ value: entry.value || entry.id, label: entry.label || entry.id, revenueMode: entry.revenueMode || (entry.value === "lottery" || entry.id === "lottery" ? "mixed_lottery" : "cash"), commissionRate: Number(entry.commissionRate || ((entry.value === "lottery" || entry.id === "lottery") ? 6 : 0)) })) : DEFAULT_DEPARTMENTS; const categories = categorySnap.exists() ? categorySnap.data().categories || DEFAULT_DAILY_CATEGORIES : DEFAULT_DAILY_CATEGORIES; return { departments, vendors: vendorDocs, dailyCashData: normalizeDailyCashDocs(dailyDocs, departments), fixedRecords: fixedDocs, fixedData: normalizeFixedDocs(fixedDocs, departments), vendorBills: billDocs, users: userDocs, joinRequests: requestDocs, categories }; }
+async function loadSettingsFromFirestore() { const [departmentDocs, vendorDocs, dailyDocs, fixedDocs, billDocs, userDocs, requestDocs, categorySnap] = await Promise.all([readCollection("departments"), readCollection("vendors"), readCollection("dailyCash"), readCollection("monthlyFixed"), readCollection("vendorBills"), readCollection("users"), readCollection("joinRequests"), getDoc(doc(db, "settings", "categories"))]); const departments = departmentDocs.length ? departmentDocs.map((entry) => ({ value: entry.value || entry.id, label: entry.label || entry.id, revenueMode: entry.revenueMode || (entry.value === "lottery" || entry.id === "lottery" ? "mixed_lottery" : "cash"), commissionRate: Number(entry.commissionRate || ((entry.value === "lottery" || entry.id === "lottery") ? 6 : 0)) })) : DEFAULT_DEPARTMENTS; const categories = categorySnap.exists() ? mergeRequiredCategories(categorySnap.data().categories || DEFAULT_DAILY_CATEGORIES) : DEFAULT_DAILY_CATEGORIES; return { departments, vendors: vendorDocs, dailyCashData: normalizeDailyCashDocs(dailyDocs, departments), fixedRecords: fixedDocs, fixedData: normalizeFixedDocs(fixedDocs, departments), vendorBills: billDocs, users: userDocs, joinRequests: requestDocs, categories }; }
 async function loginWithLine() { if (!LIFF_ID || LIFF_ID === "請填入_LINE_LIFF_ID") throw new Error("尚未設定 LIFF ID，請先在 src/App.jsx 填入 LIFF_ID。"); await liff.init({ liffId: LIFF_ID }); if (!liff.isLoggedIn()) { liff.login(); return null; } const profile = await liff.getProfile(); const lineUserId = profile.userId; const response = await fetch(AUTH_ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lineUserId }) }); if (!response.ok) throw new Error(`登入 API 失敗：${await response.text()}`); const { token } = await response.json(); await signInWithCustomToken(auth, token); const userSnap = await getDoc(doc(db, "users", lineUserId)); return { lineUserId, profile, appUser: userSnap.exists() ? { id: lineUserId, ...userSnap.data() } : null }; }
 function LoginScreen({ authState }) {
   const [requestName, setRequestName] = useState(authState.profile?.displayName || "");
@@ -1076,8 +1101,8 @@ function SettingsPage({ categories, setCategories, departments, setDepartments, 
 
 export default function App() {
   const [authState, setAuthState] = useState({ loading: true, error: "", lineUserId: "", profile: null, user: null });
-  const [page, setPage] = useState("reports");
-  const [categories, setCategories] = useState(DEFAULT_DAILY_CATEGORIES);
+  const [page, setPage] = useState("daily");
+  const [categories, setCategories] = useState(mergeRequiredCategories(DEFAULT_DAILY_CATEGORIES));
   const [departments, setDepartments] = useState(DEFAULT_DEPARTMENTS);
   const [dailyCashData, setDailyCashData] = useState({});
   const [fixedData, setFixedData] = useState({});
@@ -1092,7 +1117,7 @@ export default function App() {
   const tests = useMemo(() => runSelfTests(categories, departments), [categories, departments]);
 
   useEffect(() => { const handler = (e) => setExportFile(e.detail); window.addEventListener("finance-export-ready", handler); return () => window.removeEventListener("finance-export-ready", handler); }, []);
-  useEffect(() => { let mounted = true; async function boot() { try { const result = await loginWithLine(); if (!mounted || !result) return; setAuthState({ loading: false, error: "", lineUserId: result.lineUserId, profile: result.profile, user: result.appUser }); if (!result.appUser) return; const data = await loadSettingsFromFirestore(); if (!mounted) return; setDepartments(data.departments); setCategories(data.categories); setVendors(data.vendors); setDailyCashData(data.dailyCashData); setFixedData(data.fixedData); setFixedRecords(data.fixedRecords); setVendorBills(data.vendorBills); setUsers(data.users || []); setJoinRequests(data.joinRequests || []); } catch (error) { if (!mounted) return; setAuthState((prev) => ({ ...prev, loading: false, error: error.message || "登入失敗" })); } } boot(); return () => { mounted = false; }; }, []);
+  useEffect(() => { let mounted = true; async function boot() { try { const result = await loginWithLine(); if (!mounted || !result) return; setAuthState({ loading: false, error: "", lineUserId: result.lineUserId, profile: result.profile, user: result.appUser }); if (!result.appUser) return; const data = await loadSettingsFromFirestore(); if (!mounted) return; setDepartments(data.departments); setCategories(mergeRequiredCategories(data.categories)); setVendors(data.vendors); setDailyCashData(data.dailyCashData); setFixedData(data.fixedData); setFixedRecords(data.fixedRecords); setVendorBills(data.vendorBills); setUsers(data.users || []); setJoinRequests(data.joinRequests || []); } catch (error) { if (!mounted) return; setAuthState((prev) => ({ ...prev, loading: false, error: error.message || "登入失敗" })); } } boot(); return () => { mounted = false; }; }, []);
 
   if (authState.loading || authState.error || !currentUser) return <LoginScreen authState={authState} />;
   function setAdminPage(nextPage) { if (!isAdmin && nextPage !== "daily") return; setPage(nextPage); }
