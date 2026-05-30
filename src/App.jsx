@@ -45,7 +45,7 @@ const firebaseConfig = {
 };
 
 // TODO：請把這裡改成你 LINE Developers 取得的 LIFF ID。
-const LIFF_ID = "請填入_LINE_LIFF_ID";
+const LIFF_ID = "2010101193-M9eYhgFD";
 const AUTH_ENDPOINT = "/api/auth";
 
 const firebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
