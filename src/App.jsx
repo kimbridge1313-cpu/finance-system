@@ -299,6 +299,9 @@ function getLotteryScratchOnlyRevenue(records = []) {
     return record.type === "income" && itemLabel === "刮刮樂日收入" ? sum + Number(record.amount || 0) : sum;
   }, 0);
 }
+function getLotteryScratchMonthlyCommission(records = []) {
+  return Math.round(getLotteryScratchOnlyRevenue(records) * 0.09);
+}
 function calcDepartment(department, dailyCashData, fixedData, departments, month = "", vendorBills = [], fixedRecords = []) {
   const records = (dailyCashData[department] || []).filter((item) => !month || getRecordMonth(item) === month);
   const rawIncome = records.reduce((sum, item) => item.type === "income" ? sum + Number(item.amount || 0) : sum, 0);
@@ -306,7 +309,8 @@ function calcDepartment(department, dailyCashData, fixedData, departments, month
   const commissionRate = getDepartmentCommissionRate(department, departments);
   const scratchSales = records.reduce((sum, item) => isScratchLotteryIncome(item) ? sum + Number(item.amount || 0) : sum, 0);
   const lotteryScratchOnlyRevenue = getLotteryScratchOnlyRevenue(records);
-  const lotteryReportRevenue = department === "lottery" ? lotteryScratchOnlyRevenue : 0;
+  const lotteryScratchMonthlyCommission = getLotteryScratchMonthlyCommission(records);
+  const lotteryReportRevenue = department === "lottery" ? lotteryScratchMonthlyCommission : 0;
   const scratchCommissionRevenue = Math.round(scratchSales * commissionRate / 100);
   const keyedCommissionIncome = records.reduce((sum, item) => isLotteryCommissionIncome(item) && !isScratchLotteryIncome(item) ? sum + Number(item.amount || 0) : sum, 0);
   const normalIncome = records.reduce((sum, item) => item.type === "income" && !isScratchLotteryIncome(item) && !isLotteryCommissionIncome(item) ? sum + Number(item.amount || 0) : sum, 0);
@@ -357,6 +361,7 @@ function calcDepartment(department, dailyCashData, fixedData, departments, month
     reportGrossProfitBase,
     reportNetProfitBase,
     lotteryScratchOnlyRevenue,
+    lotteryScratchMonthlyCommission,
   };
 }
 
@@ -389,7 +394,8 @@ function buildProfitReportRows(department, dailyCashData, fixedData, departments
   const rows = [{ kind: "section", name: "營業收入(A)", amount: reportRevenue, percent: "100%" }];
 
   if (department === "lottery") {
-    rows.push({ kind: "category", name: "當月刮刮樂日收入", amount: summary.lotteryScratchOnlyRevenue, percent: percent(summary.lotteryScratchOnlyRevenue, reportRevenue) });
+    rows.push({ kind: "category", name: "刮刮樂月佣金（刮刮樂日收入 × 9%）", amount: summary.lotteryScratchMonthlyCommission, percent: percent(summary.lotteryScratchMonthlyCommission, reportRevenue) });
+    rows.push({ kind: "item", name: "當月刮刮樂日總收入", amount: summary.lotteryScratchOnlyRevenue, percent: "" });
   } else if (summary.revenueMode === "commission") {
     rows.push({ kind: "category", name: `佣金收入（代收金額 × ${summary.commissionRate}%）`, amount: summary.commissionRevenue, percent: percent(summary.commissionRevenue, summary.revenue) });
     rows.push({ kind: "item", name: "代收現金 / 銷售額（不列為收入）", amount: summary.commissionBase, percent: "" });
@@ -436,11 +442,19 @@ function toAdjustmentNumber(value) {
   const normalized = Number(value || 0);
   return Number.isFinite(normalized) ? normalized : 0;
 }
+function normalizeAdjustmentItems(items = []) {
+  return (items || []).map((item) => ({
+    name: String(item?.name || "").trim(),
+    amount: toAdjustmentNumber(item?.amount),
+  })).filter((item) => item.name || item.amount);
+}
 function applyReportAdjustments(summary, rows, adjustmentRecord) {
   const baseRevenue = summary.reportRevenueBase;
+  const revenueItems = normalizeAdjustmentItems(adjustmentRecord?.revenueItems);
+  const costItems = normalizeAdjustmentItems(adjustmentRecord?.costItems);
   const adjustments = {
-    revenueAdjustment: toAdjustmentNumber(adjustmentRecord?.revenueAdjustment),
-    costAdjustment: toAdjustmentNumber(adjustmentRecord?.costAdjustment),
+    revenueAdjustment: revenueItems.reduce((sum, item) => sum + item.amount, 0) + toAdjustmentNumber(adjustmentRecord?.revenueAdjustment),
+    costAdjustment: costItems.reduce((sum, item) => sum + item.amount, 0) + toAdjustmentNumber(adjustmentRecord?.costAdjustment),
     operatingExpenseAdjustment: toAdjustmentNumber(adjustmentRecord?.operatingExpenseAdjustment),
     nonOperatingIncome: toAdjustmentNumber(adjustmentRecord?.nonOperatingIncome),
     nonOperatingExpense: toAdjustmentNumber(adjustmentRecord?.nonOperatingExpense),
@@ -458,18 +472,51 @@ function applyReportAdjustments(summary, rows, adjustmentRecord) {
   adjustedSummary.adjustedTax = Math.max(Math.round(adjustedSummary.adjustedBeforeTax * 0.05), 0) + adjustments.taxAdjustment;
   adjustedSummary.adjustedAfterTax = adjustedSummary.adjustedBeforeTax - adjustedSummary.adjustedTax;
 
-  const adjustedRows = rows.map((row) => {
-    if (row.name === "營業收入(A)") return { ...row, amount: adjustedSummary.adjustedRevenue, percent: "100%" };
-    if (row.name === "營業成本(B)") return { ...row, amount: adjustedSummary.adjustedBusinessCost, percent: percent(adjustedSummary.adjustedBusinessCost, adjustedSummary.adjustedRevenue) };
-    if (row.name === "毛利(C=A-B)") return { ...row, amount: adjustedSummary.adjustedGrossProfit, percent: percent(adjustedSummary.adjustedGrossProfit, adjustedSummary.adjustedRevenue) };
-    if (row.name === "營運費用(D)") return { ...row, amount: adjustedSummary.adjustedOperatingExpense, percent: percent(adjustedSummary.adjustedOperatingExpense, adjustedSummary.adjustedRevenue) };
-    if (row.name === "利益(E=C-D)") return { ...row, amount: adjustedSummary.adjustedOperatingProfit, percent: percent(adjustedSummary.adjustedOperatingProfit, adjustedSummary.adjustedRevenue) };
-    if (row.name === "非營業收益(F)") return { ...row, amount: adjustments.nonOperatingIncome, percent: "" };
-    if (row.name === "非營業損損(G)") return { ...row, amount: adjustments.nonOperatingExpense, percent: "" };
-    if (row.name === "本期稅前損益(I)") return { ...row, amount: adjustedSummary.adjustedBeforeTax, percent: percent(adjustedSummary.adjustedBeforeTax, adjustedSummary.adjustedRevenue) };
-    if (row.name === "稅金總計(A*5%)") return { ...row, amount: adjustedSummary.adjustedTax, percent: "" };
-    if (row.name === "本期稅後損益") return { ...row, amount: adjustedSummary.adjustedAfterTax, percent: percent(adjustedSummary.adjustedAfterTax, adjustedSummary.adjustedRevenue) };
-    return row;
+  const adjustedRows = [];
+  rows.forEach((row) => {
+    if (row.name === "營業收入(A)") {
+      adjustedRows.push({ ...row, amount: adjustedSummary.adjustedRevenue, percent: "100%" });
+      revenueItems.forEach((item) => adjustedRows.push({ kind: "item", name: item.name || "收入調整", amount: item.amount, percent: "" }));
+      return;
+    }
+    if (row.name === "營業成本(B)") {
+      adjustedRows.push({ ...row, amount: adjustedSummary.adjustedBusinessCost, percent: percent(adjustedSummary.adjustedBusinessCost, adjustedSummary.adjustedRevenue) });
+      costItems.forEach((item) => adjustedRows.push({ kind: "item", name: item.name || "成本調整", amount: item.amount, percent: "" }));
+      return;
+    }
+    if (row.name === "毛利(C=A-B)") {
+      adjustedRows.push({ ...row, amount: adjustedSummary.adjustedGrossProfit, percent: percent(adjustedSummary.adjustedGrossProfit, adjustedSummary.adjustedRevenue) });
+      return;
+    }
+    if (row.name === "營運費用(D)") {
+      adjustedRows.push({ ...row, amount: adjustedSummary.adjustedOperatingExpense, percent: percent(adjustedSummary.adjustedOperatingExpense, adjustedSummary.adjustedRevenue) });
+      return;
+    }
+    if (row.name === "利益(E=C-D)") {
+      adjustedRows.push({ ...row, amount: adjustedSummary.adjustedOperatingProfit, percent: percent(adjustedSummary.adjustedOperatingProfit, adjustedSummary.adjustedRevenue) });
+      return;
+    }
+    if (row.name === "非營業收益(F)") {
+      adjustedRows.push({ ...row, amount: adjustments.nonOperatingIncome, percent: "" });
+      return;
+    }
+    if (row.name === "非營業損損(G)") {
+      adjustedRows.push({ ...row, amount: adjustments.nonOperatingExpense, percent: "" });
+      return;
+    }
+    if (row.name === "本期稅前損益(I)") {
+      adjustedRows.push({ ...row, amount: adjustedSummary.adjustedBeforeTax, percent: percent(adjustedSummary.adjustedBeforeTax, adjustedSummary.adjustedRevenue) });
+      return;
+    }
+    if (row.name === "稅金總計(A*5%)") {
+      adjustedRows.push({ ...row, amount: adjustedSummary.adjustedTax, percent: "" });
+      return;
+    }
+    if (row.name === "本期稅後損益") {
+      adjustedRows.push({ ...row, amount: adjustedSummary.adjustedAfterTax, percent: percent(adjustedSummary.adjustedAfterTax, adjustedSummary.adjustedRevenue) });
+      return;
+    }
+    adjustedRows.push(row);
   });
   return { adjustments, adjustedSummary, adjustedRows };
 }
