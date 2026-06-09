@@ -647,11 +647,9 @@ function DailyCash({ currentUser, isAdmin, categories, departments, dailyCashDat
     const file = event.target.files?.[0];
     if (!file) return;
     const text = await file.text();
-    const lines = text.replace(/^﻿/, "").split(/
-?
-/).filter((line) => line.trim());
+    const lines = text.replace(/^\uFEFF/, "").split("\n").map((line) => line.replace(/\r/g, "")).filter((line) => line.trim());
     if (lines.length <= 1) {
-      setImportMessage("匯入失敗：檔案沒有資料。 ");
+      setImportMessage("匯入失敗：檔案沒有資料。");
       event.target.value = "";
       return;
     }
