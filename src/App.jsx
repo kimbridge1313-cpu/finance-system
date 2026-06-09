@@ -316,6 +316,9 @@ function calcDepartment(department, dailyCashData, fixedData, departments, month
   const businessCost = dailyCost + monthlyPurchase;
   const grossProfit = revenue - businessCost;
   const netProfit = grossProfit - operatingExpense;
+  const reportRevenueBase = revenueMode === "mixed_lottery" ? scratchSales : revenue;
+  const reportGrossProfitBase = reportRevenueBase - businessCost;
+  const reportNetProfitBase = reportGrossProfitBase - operatingExpense;
   return {
     department,
     departmentLabel: getDepartmentLabel(department, departments),
@@ -342,6 +345,9 @@ function calcDepartment(department, dailyCashData, fixedData, departments, month
     totalExpense: businessCost + operatingExpense,
     grossProfit,
     netProfit,
+    reportRevenueBase,
+    reportGrossProfitBase,
+    reportNetProfitBase,
   };
 }
 
@@ -367,10 +373,10 @@ function buildProfitReportRows(department, dailyCashData, fixedData, departments
   const costGroups = getCategoryBreakdown(department, "expense", dailyCashData, month, isCostRecord);
   const operatingGroups = getCategoryBreakdown(department, "expense", dailyCashData, month, isOperatingExpenseRecord);
   const monthlyBills = vendorBills.filter((bill) => bill.department === department && (!month || getBillMonthValue(bill) === month));
-  const grossProfit = summary.grossProfit;
-  const beforeTax = summary.netProfit;
+  const grossProfit = summary.reportGrossProfitBase;
+  const beforeTax = summary.reportNetProfitBase;
   const tax = Math.max(Math.round(beforeTax * 0.05), 0);
-  const reportRevenue = summary.revenueMode === "mixed_lottery" ? summary.scratchSales : summary.revenue;
+  const reportRevenue = summary.reportRevenueBase;
   const rows = [{ kind: "section", name: "營業收入(A)", amount: reportRevenue, percent: "100%" }];
 
   if (summary.revenueMode === "mixed_lottery") {
@@ -422,7 +428,7 @@ function toAdjustmentNumber(value) {
   return Number.isFinite(normalized) ? normalized : 0;
 }
 function applyReportAdjustments(summary, rows, adjustmentRecord) {
-  const baseRevenue = summary.revenueMode === "mixed_lottery" ? summary.scratchSales : summary.revenue;
+  const baseRevenue = summary.reportRevenueBase;
   const adjustments = {
     revenueAdjustment: toAdjustmentNumber(adjustmentRecord?.revenueAdjustment),
     costAdjustment: toAdjustmentNumber(adjustmentRecord?.costAdjustment),
