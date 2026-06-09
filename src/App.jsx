@@ -1033,27 +1033,79 @@ function ProfitLoss({ currentUser, isAdmin, departments, dailyCashData, fixedDat
   const summary = calcDepartment(department, dailyCashData, fixedData, departments, month, vendorBills, fixedRecords);
   const rows = buildProfitReportRows(department, dailyCashData, fixedData, departments, month, vendorBills, fixedRecords);
   const adjustmentRecord = getReportAdjustmentRecord(month, department, reportAdjustments);
-  const { adjustments, adjustedSummary, adjustedRows } = applyReportAdjustments(summary, rows, adjustmentRecord);
-  const [draftAdjustment, setDraftAdjustment] = useState({ revenueAdjustment: "", costAdjustment: "", operatingExpenseAdjustment: "", nonOperatingIncome: "", nonOperatingExpense: "", taxAdjustment: "", note: "" });
-  useEffect(() => {
+  const { adjustedSummary, adjustedRows } = applyReportAdjustments(summary, rows, adjustmentRecord);
+  const [draftAdjustment, setDraftAdjustment] = useState({
+    revenueItems: [{ name: "", amount: "" }],
+    costItems: [{ name: "", amount: "" }],
+    operatingExpenseAdjustment: "",
+    nonOperatingIncome: "",
+    nonOperatingExpense: "",
+    taxAdjustment: "",
+    note: "",
+  });
+
+  function normalizeDraftItems(items) {
+    return (items?.length ? items : [{ name: "", amount: "" }]).map((item) => ({
+      name: item?.name || "",
+      amount: item?.amount === 0 || item?.amount ? String(item.amount) : "",
+    }));
+  }
+
+  function loadAdjustmentDraft(record) {
     setDraftAdjustment({
-      revenueAdjustment: String(adjustmentRecord?.revenueAdjustment || ""),
-      costAdjustment: String(adjustmentRecord?.costAdjustment || ""),
-      operatingExpenseAdjustment: String(adjustmentRecord?.operatingExpenseAdjustment || ""),
-      nonOperatingIncome: String(adjustmentRecord?.nonOperatingIncome || ""),
-      nonOperatingExpense: String(adjustmentRecord?.nonOperatingExpense || ""),
-      taxAdjustment: String(adjustmentRecord?.taxAdjustment || ""),
-      note: adjustmentRecord?.note || "",
+      revenueItems: normalizeDraftItems(record?.revenueItems),
+      costItems: normalizeDraftItems(record?.costItems),
+      operatingExpenseAdjustment: String(record?.operatingExpenseAdjustment || ""),
+      nonOperatingIncome: String(record?.nonOperatingIncome || ""),
+      nonOperatingExpense: String(record?.nonOperatingExpense || ""),
+      taxAdjustment: String(record?.taxAdjustment || ""),
+      note: record?.note || "",
     });
+  }
+
+  useEffect(() => {
+    loadAdjustmentDraft(adjustmentRecord);
   }, [month, department, adjustmentRecord?.id]);
+
+  function updateAdjustmentItem(section, index, field, value) {
+    const fieldName = section === "revenue" ? "revenueItems" : "costItems";
+    setDraftAdjustment((prev) => ({
+      ...prev,
+      [fieldName]: (prev[fieldName] || []).map((item, itemIndex) => itemIndex === index ? { ...item, [field]: value } : item),
+    }));
+  }
+
+  function addAdjustmentItem(section) {
+    const fieldName = section === "revenue" ? "revenueItems" : "costItems";
+    setDraftAdjustment((prev) => ({
+      ...prev,
+      [fieldName]: [...(prev[fieldName] || []), { name: "", amount: "" }],
+    }));
+  }
+
+  function removeAdjustmentItem(section, index) {
+    const fieldName = section === "revenue" ? "revenueItems" : "costItems";
+    setDraftAdjustment((prev) => {
+      const nextItems = (prev[fieldName] || []).filter((_, itemIndex) => itemIndex !== index);
+      return {
+        ...prev,
+        [fieldName]: nextItems.length ? nextItems : [{ name: "", amount: "" }],
+      };
+    });
+  }
+
+  function sumDraftItems(items) {
+    return (items || []).reduce((sum, item) => sum + toAdjustmentNumber(item.amount), 0);
+  }
+
   async function saveAdjustment() {
     const id = getReportAdjustmentKey(month, department);
     const record = {
       id,
       month,
       department,
-      revenueAdjustment: toAdjustmentNumber(draftAdjustment.revenueAdjustment),
-      costAdjustment: toAdjustmentNumber(draftAdjustment.costAdjustment),
+      revenueItems: (draftAdjustment.revenueItems || []).filter((item) => String(item.name || "").trim() || String(item.amount || "").trim()).map((item) => ({ name: String(item.name || "").trim(), amount: toAdjustmentNumber(item.amount) })),
+      costItems: (draftAdjustment.costItems || []).filter((item) => String(item.name || "").trim() || String(item.amount || "").trim()).map((item) => ({ name: String(item.name || "").trim(), amount: toAdjustmentNumber(item.amount) })),
       operatingExpenseAdjustment: toAdjustmentNumber(draftAdjustment.operatingExpenseAdjustment),
       nonOperatingIncome: toAdjustmentNumber(draftAdjustment.nonOperatingIncome),
       nonOperatingExpense: toAdjustmentNumber(draftAdjustment.nonOperatingExpense),
@@ -1064,10 +1116,12 @@ function ProfitLoss({ currentUser, isAdmin, departments, dailyCashData, fixedDat
     await setDoc(doc(db, "reportAdjustments", id), record, { merge: true });
     setReportAdjustments((prev) => prev.some((item) => item.id === id) ? prev.map((item) => item.id === id ? record : item) : [record, ...prev]);
   }
+
   function exportCsv() {
     downloadCsv(`${month}_${getDepartmentLabel(department, departments)}_營運月報表.csv`, [["會計科目", "金額", "%"], ...adjustedRows.map((r) => [r.kind === "item" ? `- ${r.name}` : r.name, r.amount, r.percent]), ["調整備註", draftAdjustment.note || adjustmentRecord?.note || "", ""]]);
   }
-  return <div className="space-y-5"><PageHeader title="部門損益表" subtitle="手機版營運月報表，可保留系統計算並手動調整。" icon={ICONS.chart} /><Card className="space-y-4"><Field label="月份"><Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} /></Field><Field label="部門"><Select value={department} onChange={(e) => setDepartment(e.target.value)}>{available.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}</Select></Field></Card><div className="grid grid-cols-2 gap-3"><StatCard label="營業收入" value={adjustedSummary.adjustedRevenue} /><StatCard label="營業成本" value={adjustedSummary.adjustedBusinessCost} /><StatCard label="營運費用" value={adjustedSummary.adjustedOperatingExpense} /><StatCard label="稅前損益" value={adjustedSummary.adjustedBeforeTax} tone="green" /></div><Card><div className="h-64"><ResponsiveContainer width="100%" height="100%"><BarChart data={[{ name: "收入", 金額: adjustedSummary.adjustedRevenue }, { name: "成本", 金額: adjustedSummary.adjustedBusinessCost }, { name: "費用", 金額: adjustedSummary.adjustedOperatingExpense }]}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" /><YAxis /><Tooltip formatter={(v) => money(v)} /><Bar dataKey="金額" fill={GREEN} radius={[12, 12, 0, 0]} /></BarChart></ResponsiveContainer></div></Card><Card className="space-y-4"><div><h2 className="font-black text-gray-950">報表調整</h2><p className="mt-1 text-xs font-bold text-gray-400">系統先自動帶值，再針對不好自動化的欄位手動微調。</p></div><div className="grid grid-cols-2 gap-3"><Field label="營業收入調整"><Input type="number" value={draftAdjustment.revenueAdjustment} onChange={(e) => setDraftAdjustment((prev) => ({ ...prev, revenueAdjustment: e.target.value }))} placeholder="可輸入正負值" /></Field><Field label="營業成本調整"><Input type="number" value={draftAdjustment.costAdjustment} onChange={(e) => setDraftAdjustment((prev) => ({ ...prev, costAdjustment: e.target.value }))} placeholder="可輸入正負值" /></Field><Field label="營運費用調整"><Input type="number" value={draftAdjustment.operatingExpenseAdjustment} onChange={(e) => setDraftAdjustment((prev) => ({ ...prev, operatingExpenseAdjustment: e.target.value }))} placeholder="可輸入正負值" /></Field><Field label="非營業收益"><Input type="number" value={draftAdjustment.nonOperatingIncome} onChange={(e) => setDraftAdjustment((prev) => ({ ...prev, nonOperatingIncome: e.target.value }))} placeholder="例如 利息收入" /></Field><Field label="非營業損失"><Input type="number" value={draftAdjustment.nonOperatingExpense} onChange={(e) => setDraftAdjustment((prev) => ({ ...prev, nonOperatingExpense: e.target.value }))} placeholder="例如 匯損" /></Field><Field label="稅金調整"><Input type="number" value={draftAdjustment.taxAdjustment} onChange={(e) => setDraftAdjustment((prev) => ({ ...prev, taxAdjustment: e.target.value }))} placeholder="可輸入正負值" /></Field></div><Field label="調整說明 / 備註"><TextArea rows={4} value={draftAdjustment.note} onChange={(e) => setDraftAdjustment((prev) => ({ ...prev, note: e.target.value }))} placeholder="記錄這個月為何需要人工調整，例如：月底盤點差異、折讓未入帳、手動補列雜項等" /></Field><div className="grid grid-cols-2 gap-2"><PrimaryButton type="button" onClick={saveAdjustment}>儲存報表調整</PrimaryButton><SmallButton type="button" tone="gray" className="rounded-2xl py-3" onClick={() => setDraftAdjustment({ revenueAdjustment: String(adjustmentRecord?.revenueAdjustment || ""), costAdjustment: String(adjustmentRecord?.costAdjustment || ""), operatingExpenseAdjustment: String(adjustmentRecord?.operatingExpenseAdjustment || ""), nonOperatingIncome: String(adjustmentRecord?.nonOperatingIncome || ""), nonOperatingExpense: String(adjustmentRecord?.nonOperatingExpense || ""), taxAdjustment: String(adjustmentRecord?.taxAdjustment || ""), note: adjustmentRecord?.note || "" })}>還原已儲存值</SmallButton></div></Card><ProfitReportTable title={`${month} ${getDepartmentLabel(department, departments)} 營運月報表`} rows={adjustedRows} onExportCsv={exportCsv} /></div>; }
+
+  return <div className="space-y-5"><PageHeader title="部門損益表" subtitle="手機版營運月報表，可保留系統計算並手動調整。" icon={ICONS.chart} /><Card className="space-y-4"><Field label="月份"><Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} /></Field><Field label="部門"><Select value={department} onChange={(e) => setDepartment(e.target.value)}>{available.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}</Select></Field></Card><div className="grid grid-cols-2 gap-3"><StatCard label="營業收入" value={adjustedSummary.adjustedRevenue} /><StatCard label="營業成本" value={adjustedSummary.adjustedBusinessCost} /><StatCard label="營運費用" value={adjustedSummary.adjustedOperatingExpense} /><StatCard label="稅前損益" value={adjustedSummary.adjustedBeforeTax} tone="green" /></div><Card><div className="h-64"><ResponsiveContainer width="100%" height="100%"><BarChart data={[{ name: "收入", 金額: adjustedSummary.adjustedRevenue }, { name: "成本", 金額: adjustedSummary.adjustedBusinessCost }, { name: "費用", 金額: adjustedSummary.adjustedOperatingExpense }]}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" /><YAxis /><Tooltip formatter={(v) => money(v)} /><Bar dataKey="金額" fill={GREEN} radius={[12, 12, 0, 0]} /></BarChart></ResponsiveContainer></div></Card><Card className="space-y-4"><div><h2 className="font-black text-gray-950">報表調整</h2><p className="mt-1 text-xs font-bold text-gray-400">營業收入(A) 與營業成本(B) 可新增、刪除、修改名稱與金額。</p></div><div className="space-y-3 rounded-3xl bg-gray-50 p-4"><div className="flex items-center justify-between"><h3 className="font-black text-gray-950">營業收入(A) 調整項目</h3><SmallButton type="button" onClick={() => addAdjustmentItem("revenue")}>新增項目</SmallButton></div>{(draftAdjustment.revenueItems || []).map((item, index) => <div key={`revenue_${index}`} className="grid grid-cols-[1fr_120px_44px] gap-2"><Input value={item.name} onChange={(e) => updateAdjustmentItem("revenue", index, "name", e.target.value)} placeholder="例如：月底補列收入" /><Input type="number" value={item.amount} onChange={(e) => updateAdjustmentItem("revenue", index, "amount", e.target.value)} placeholder="金額" /><button type="button" onClick={() => removeAdjustmentItem("revenue", index)} className="rounded-2xl bg-red-50 text-lg font-black text-red-500">×</button></div>)}<p className="text-right text-xs font-black text-gray-500">收入調整合計 {money(sumDraftItems(draftAdjustment.revenueItems))}</p></div><div className="space-y-3 rounded-3xl bg-gray-50 p-4"><div className="flex items-center justify-between"><h3 className="font-black text-gray-950">營業成本(B) 調整項目</h3><SmallButton type="button" onClick={() => addAdjustmentItem("cost")}>新增項目</SmallButton></div>{(draftAdjustment.costItems || []).map((item, index) => <div key={`cost_${index}`} className="grid grid-cols-[1fr_120px_44px] gap-2"><Input value={item.name} onChange={(e) => updateAdjustmentItem("cost", index, "name", e.target.value)} placeholder="例如：月底補列成本" /><Input type="number" value={item.amount} onChange={(e) => updateAdjustmentItem("cost", index, "amount", e.target.value)} placeholder="金額" /><button type="button" onClick={() => removeAdjustmentItem("cost", index)} className="rounded-2xl bg-red-50 text-lg font-black text-red-500">×</button></div>)}<p className="text-right text-xs font-black text-gray-500">成本調整合計 {money(sumDraftItems(draftAdjustment.costItems))}</p></div><div className="grid grid-cols-2 gap-3"><Field label="營運費用調整"><Input type="number" value={draftAdjustment.operatingExpenseAdjustment} onChange={(e) => setDraftAdjustment((prev) => ({ ...prev, operatingExpenseAdjustment: e.target.value }))} placeholder="可輸入正負值" /></Field><Field label="非營業收益"><Input type="number" value={draftAdjustment.nonOperatingIncome} onChange={(e) => setDraftAdjustment((prev) => ({ ...prev, nonOperatingIncome: e.target.value }))} placeholder="例如 利息收入" /></Field><Field label="非營業損失"><Input type="number" value={draftAdjustment.nonOperatingExpense} onChange={(e) => setDraftAdjustment((prev) => ({ ...prev, nonOperatingExpense: e.target.value }))} placeholder="例如 匯損" /></Field><Field label="稅金調整"><Input type="number" value={draftAdjustment.taxAdjustment} onChange={(e) => setDraftAdjustment((prev) => ({ ...prev, taxAdjustment: e.target.value }))} placeholder="可輸入正負值" /></Field></div><Field label="調整說明 / 備註"><TextArea rows={4} value={draftAdjustment.note} onChange={(e) => setDraftAdjustment((prev) => ({ ...prev, note: e.target.value }))} placeholder="記錄這個月為何需要人工調整，例如：月底盤點差異、折讓未入帳、手動補列雜項等" /></Field><div className="grid grid-cols-2 gap-2"><PrimaryButton type="button" onClick={saveAdjustment}>儲存報表調整</PrimaryButton><SmallButton type="button" tone="gray" className="rounded-2xl py-3" onClick={() => loadAdjustmentDraft(adjustmentRecord)}>還原已儲存值</SmallButton></div></Card><ProfitReportTable title={`${month} ${getDepartmentLabel(department, departments)} 營運月報表`} rows={adjustedRows} onExportCsv={exportCsv} /></div>; }
 function Summary({ departments, dailyCashData, fixedData, fixedRecords = [], vendorBills = [] }) { const [month, setMonth] = useState(() => getTodayDate().slice(0, 7)); const rows = departments.map((d) => calcDepartment(d.value, dailyCashData, fixedData, departments, month, vendorBills, fixedRecords)); const total = rows.reduce((a, r) => ({ revenue: a.revenue + r.revenue, businessCost: a.businessCost + r.businessCost, operatingExpense: a.operatingExpense + r.operatingExpense, totalExpense: a.totalExpense + r.totalExpense, netProfit: a.netProfit + r.netProfit }), { revenue: 0, businessCost: 0, operatingExpense: 0, totalExpense: 0, netProfit: 0 }); function exportCsv() { downloadCsv(`${month}_企業總損益表.csv`, [["部門", "營業收入", "營業成本", "營運費用", "淨利"], ...rows.map((r) => [r.departmentLabel, r.revenue, r.businessCost, r.operatingExpense, r.netProfit]), ["合計", total.revenue, total.businessCost, total.operatingExpense, total.netProfit]]); } return <div className="space-y-5"><PageHeader title="總損益表" subtitle="公司全部部門彙總。" icon={ICONS.chart} /><Card className="space-y-4"><Field label="月份"><Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} /></Field><SmallButton type="button" onClick={exportCsv} className="rounded-2xl py-3">輸出 CSV</SmallButton></Card><section className="rounded-[28px] bg-[#06C755] p-5 text-white"><p className="text-sm font-bold text-white/75">公司稅前淨利</p><p className="mt-1 text-4xl font-black">{money(total.netProfit)}</p></section><Card><div className="h-72"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={rows.map((r) => ({ name: r.departmentLabel, value: r.revenue }))} cx="50%" cy="50%" outerRadius={92} dataKey="value" label={({ name, percent: p }) => `${name} ${(p * 100).toFixed(0)}%`}>{rows.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}</Pie><Tooltip formatter={(v) => money(v)} /></PieChart></ResponsiveContainer></div></Card><Card className="overflow-hidden p-0"><div className="overflow-x-auto"><table className="w-full min-w-[700px] text-sm"><tbody>{rows.map((r) => <tr key={r.department}><td className="border px-2 py-2 font-black">{r.departmentLabel}</td><td className="border px-2 py-2 text-right">{plainMoney(r.revenue)}</td><td className="border px-2 py-2 text-right">{plainMoney(r.businessCost)}</td><td className="border px-2 py-2 text-right">{plainMoney(r.operatingExpense)}</td><td className="border px-2 py-2 text-right font-black">{plainMoney(r.netProfit)}</td></tr>)}</tbody></table></div></Card></div>; }
 function ReportsPage(props) { const [open, setOpen] = useState("summary"); return <div className="space-y-5"><PageHeader title="報表中心" subtitle="總損益表與部門損益表。" icon={ICONS.chart} /><AccordionSection title="總損益表" subtitle="查看全部部門彙總" icon={ICONS.chart} open={open === "summary"} onToggle={() => setOpen(open === "summary" ? "" : "summary")}><Summary {...props} /></AccordionSection><AccordionSection title="部門損益表" subtitle="查看單一部門營運月報表，可手動調整" icon={ICONS.chart} open={open === "profit"} onToggle={() => setOpen(open === "profit" ? "" : "profit")}><ProfitLoss currentUser={{ role: "admin", department: "all" }} isAdmin {...props} /></AccordionSection></div>; }
 
