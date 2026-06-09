@@ -422,6 +422,7 @@ function toAdjustmentNumber(value) {
   return Number.isFinite(normalized) ? normalized : 0;
 }
 function applyReportAdjustments(summary, rows, adjustmentRecord) {
+  const baseRevenue = summary.revenueMode === "mixed_lottery" ? summary.scratchSales : summary.revenue;
   const adjustments = {
     revenueAdjustment: toAdjustmentNumber(adjustmentRecord?.revenueAdjustment),
     costAdjustment: toAdjustmentNumber(adjustmentRecord?.costAdjustment),
@@ -432,7 +433,7 @@ function applyReportAdjustments(summary, rows, adjustmentRecord) {
   };
   const adjustedSummary = {
     ...summary,
-    adjustedRevenue: summary.revenue + adjustments.revenueAdjustment,
+    adjustedRevenue: baseRevenue + adjustments.revenueAdjustment,
     adjustedBusinessCost: summary.businessCost + adjustments.costAdjustment,
     adjustedOperatingExpense: summary.operatingExpense + adjustments.operatingExpenseAdjustment,
   };
