@@ -370,13 +370,11 @@ function buildProfitReportRows(department, dailyCashData, fixedData, departments
   const grossProfit = summary.grossProfit;
   const beforeTax = summary.netProfit;
   const tax = Math.max(Math.round(beforeTax * 0.05), 0);
-  const rows = [{ kind: "section", name: "營業收入(A)", amount: summary.revenue, percent: "100%" }];
+  const reportRevenue = summary.revenueMode === "mixed_lottery" ? summary.scratchSales : summary.revenue;
+  const rows = [{ kind: "section", name: "營業收入(A)", amount: reportRevenue, percent: "100%" }];
 
   if (summary.revenueMode === "mixed_lottery") {
-    rows.push({ kind: "category", name: `刮刮樂佣金收入（銷售額 × ${summary.commissionRate}%）`, amount: summary.scratchCommissionRevenue, percent: percent(summary.scratchCommissionRevenue, summary.revenue) });
-    rows.push({ kind: "item", name: "刮刮樂銷售額（不全額列為收入）", amount: summary.scratchSales, percent: "" });
-    if (summary.keyedCommissionIncome > 0) rows.push({ kind: "category", name: "電腦型 / 機台佣金收入", amount: summary.keyedCommissionIncome, percent: percent(summary.keyedCommissionIncome, summary.revenue) });
-    if (summary.normalIncome > 0) rows.push({ kind: "category", name: "其他收入", amount: summary.normalIncome, percent: percent(summary.normalIncome, summary.revenue) });
+    rows.push({ kind: "category", name: "當月刮刮樂日收入", amount: summary.scratchSales, percent: percent(summary.scratchSales, reportRevenue) });
   } else if (summary.revenueMode === "commission") {
     rows.push({ kind: "category", name: `佣金收入（代收金額 × ${summary.commissionRate}%）`, amount: summary.commissionRevenue, percent: percent(summary.commissionRevenue, summary.revenue) });
     rows.push({ kind: "item", name: "代收現金 / 銷售額（不列為收入）", amount: summary.commissionBase, percent: "" });
@@ -388,7 +386,7 @@ function buildProfitReportRows(department, dailyCashData, fixedData, departments
     });
   }
 
-  rows.push({ kind: "section", name: "營業成本(B)", amount: summary.businessCost, percent: percent(summary.businessCost, summary.revenue) });
+  rows.push({ kind: "section", name: "營業成本(B)", amount: summary.businessCost, percent: percent(summary.businessCost, reportRevenue) });
   costGroups.forEach((group) => {
     rows.push({ kind: "category", name: group.label, amount: group.amount, percent: "" });
     group.items.forEach((item) => rows.push({ kind: "item", name: item.label, amount: item.amount, percent: "" }));
@@ -398,20 +396,20 @@ function buildProfitReportRows(department, dailyCashData, fixedData, departments
     rows.push({ kind: "category", name: "月結貨款", amount: monthlyTotal, percent: "" });
   }
 
-  rows.push({ kind: "section", name: "毛利(C=A-B)", amount: grossProfit, percent: percent(grossProfit, summary.revenue) });
-  rows.push({ kind: "section", name: "營運費用(D)", amount: summary.operatingExpense, percent: percent(summary.operatingExpense, summary.revenue) });
+  rows.push({ kind: "section", name: "毛利(C=A-B)", amount: grossProfit, percent: percent(grossProfit, reportRevenue) });
+  rows.push({ kind: "section", name: "營運費用(D)", amount: summary.operatingExpense, percent: percent(summary.operatingExpense, reportRevenue) });
   operatingGroups.forEach((group) => {
     rows.push({ kind: "category", name: group.label, amount: group.amount, percent: "" });
     group.items.forEach((item) => rows.push({ kind: "item", name: item.label, amount: item.amount, percent: "" }));
   });
   rows.push({ kind: "category", name: "月固定支出－營業支出", amount: summary.fixedOperatingExpense, percent: "" });
   rows.push({ kind: "category", name: "月固定支出－人事費用", amount: summary.fixedPersonnelExpense, percent: "" });
-  rows.push({ kind: "section", name: "利益(E=C-D)", amount: summary.netProfit, percent: percent(summary.netProfit, summary.revenue) });
+  rows.push({ kind: "section", name: "利益(E=C-D)", amount: summary.netProfit, percent: percent(summary.netProfit, reportRevenue) });
   rows.push({ kind: "section", name: "非營業收益(F)", amount: 0, percent: "" });
   rows.push({ kind: "section", name: "非營業損損(G)", amount: 0, percent: "" });
-  rows.push({ kind: "section", name: "本期稅前損益(I)", amount: beforeTax, percent: percent(beforeTax, summary.revenue) });
+  rows.push({ kind: "section", name: "本期稅前損益(I)", amount: beforeTax, percent: percent(beforeTax, reportRevenue) });
   rows.push({ kind: "section", name: "稅金總計(A*5%)", amount: tax, percent: "" });
-  rows.push({ kind: "final", name: "本期稅後損益", amount: beforeTax - tax, percent: percent(beforeTax - tax, summary.revenue) });
+  rows.push({ kind: "final", name: "本期稅後損益", amount: beforeTax - tax, percent: percent(beforeTax - tax, reportRevenue) });
   return rows;
 }
 function getReportAdjustmentKey(month, department) { return `${month}_${department}`; }
