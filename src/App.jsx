@@ -482,6 +482,10 @@ function DailyCash({ currentUser, isAdmin, categories, departments, dailyCashDat
   const [department, setDepartment] = useState(initialDepartment);
   const [date, setDate] = useState(() => getTodayDate());
   const [adminQueryDate, setAdminQueryDate] = useState(() => getTodayDate());
+  const [exportStartDate, setExportStartDate] = useState(() => getTodayDate());
+  const [exportEndDate, setExportEndDate] = useState(() => getTodayDate());
+  const [exportDepartment, setExportDepartment] = useState("all");
+  const [importMessage, setImportMessage] = useState("");
   const [entryType, setEntryType] = useState("expense");
   const [category, setCategory] = useState(firstExpenseCategory?.id || "");
   const [entryItem, setEntryItem] = useState(() => getItemOptions(categories, "expense", firstExpenseCategory?.id || "")[0] || "");
@@ -603,12 +607,94 @@ function DailyCash({ currentUser, isAdmin, categories, departments, dailyCashDat
     return <div className="mt-4 space-y-4 rounded-3xl bg-gray-50 p-4"><div className="grid grid-cols-2 gap-3"><Field label="日期"><Input type="date" value={draft.date} onChange={(e) => updateDraft(key, "date", e.target.value)} /></Field><Field label="類型"><Select value={draft.type} onChange={(e) => updateDraft(key, "type", e.target.value)}><option value="expense">支出</option><option value="income">收入</option></Select></Field></div><Field label="細項分類"><Select value={draft.categoryId} onChange={(e) => updateDraft(key, "categoryId", e.target.value)}>{draftCats.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</Select></Field><Field label="記帳項目">{manual ? <Input value={draft.item} onChange={(e) => updateDraft(key, "item", e.target.value)} /> : <Select value={draft.item} onChange={(e) => updateDraft(key, "item", e.target.value)}>{draftItems.map((item) => <option key={item} value={item}>{item}</option>)}</Select>}</Field>{showVendor && <Field label="現結貨款廠商"><SearchableVendorSelect value={draft.vendorId} onChange={(nextVendorId) => updateDraft(key, "vendorId", nextVendorId)} vendors={cashVendors} departments={departments} placeholder="輸入現結廠商名稱或代碼搜尋" /></Field>}<Field label="歸帳部門"><Select value={draft.department} onChange={(e) => updateDraft(key, "department", e.target.value)}>{departments.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}</Select></Field><Field label="金額"><Input type="number" value={draft.amount} onChange={(e) => updateDraft(key, "amount", e.target.value)} /></Field><Field label="備註"><Input value={draft.note || ""} onChange={(e) => updateDraft(key, "note", e.target.value)} /></Field><div className="grid grid-cols-2 gap-2"><PrimaryButton type="button" onClick={() => saveInline(key)}>儲存修改</PrimaryButton><SmallButton type="button" tone="gray" className="rounded-2xl py-3" onClick={() => setExpandedEntryKey("")}>收合</SmallButton></div></div>;
   }
   const adminDayRecords = departments.flatMap((dept) => (dailyCashData[dept.value] || []).map((record, index) => ({ ...record, sourceIndex: index, departmentLabel: dept.label || getDepartmentLabel(dept.value, departments), department: record.department || dept.value })).filter((record) => getRecordDate(record) === adminQueryDate));
+  const allRecords = departments.flatMap((dept) => (dailyCashData[dept.value] || []).map((record, index) => ({ ...record, sourceIndex: index, department: record.department || dept.value })));
+  const exportRecords = allRecords.filter((record) => {
+    const recordDate = getRecordDate(record);
+    const startOk = !exportStartDate || recordDate >= exportStartDate;
+    const endOk = !exportEndDate || recordDate <= exportEndDate;
+    const departmentOk = exportDepartment === "all" || record.department === exportDepartment;
+    return startOk && endOk && departmentOk;
+  });
   function renderDetailList(records, showDepartment) { if (!records.length) return <div className="p-5 text-sm font-bold text-gray-400">沒有記帳明細。</div>; return <div className="divide-y divide-gray-100">{records.map((record) => <div key={`${showDepartment ? "all" : "one"}-${keyOf(record)}`} className="p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2">{showDepartment && <span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-black text-gray-500">{record.departmentLabel}</span>}<span className={`rounded-full px-2 py-1 text-xs font-black ${record.type === "income" ? "bg-[#06C755]/10 text-[#06C755]" : "bg-red-50 text-red-500"}`}>{getTypeLabel(record.type, categories)}</span><span className="text-sm font-black text-gray-950">{record.category}</span></div><p className="mt-2 text-sm font-bold text-gray-700">{getItemLabel(record.item)}</p>{record.vendorName && <p className="mt-1 text-xs font-black text-[#06C755]">廠商：{record.vendorName}</p>}<p className="mt-1 text-xs text-gray-400">{record.note || "無備註"}</p></div><div className="shrink-0 text-right"><p className={`text-base font-black ${record.type === "income" ? "text-[#06C755]" : "text-red-500"}`}>{money(record.amount)}</p><div className="mt-3 flex gap-2"><SmallButton type="button" tone="gray" onClick={() => startEdit(record)}>編輯</SmallButton><SmallButton type="button" tone="red" onClick={() => deleteEntry(record)}>刪除</SmallButton></div></div></div>{expandedEntryKey === keyOf(record) && renderEntryEditor(record)}</div>)}</div>; }
+  function exportRangeCsv() {
+    const rows = [["日期", "類型", "部門", "細項分類", "記帳項目", "廠商", "金額", "備註"], ...exportRecords.map((record) => [getRecordDate(record), record.type === "income" ? "收入" : "支出", getDepartmentLabel(record.department, departments), record.category || "", getItemLabel(record.item), record.vendorName || "", Number(record.amount || 0), record.note || ""])];
+    downloadCsv(`${exportStartDate}_${exportEndDate}_${exportDepartment === "all" ? "全部部門" : getDepartmentLabel(exportDepartment, departments)}_每日記帳.csv`, rows);
+  }
+  function parseCsvLine(line) {
+    const result = [];
+    let current = "";
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i += 1) {
+      const char = line[i];
+      if (char === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          current += '"';
+          i += 1;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (char === "," && !inQuotes) {
+        result.push(current);
+        current = "";
+      } else {
+        current += char;
+      }
+    }
+    result.push(current);
+    return result;
+  }
+  async function handleImportFile(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    const lines = text.replace(/^﻿/, "").split(/
+?
+/).filter((line) => line.trim());
+    if (lines.length <= 1) {
+      setImportMessage("匯入失敗：檔案沒有資料。 ");
+      event.target.value = "";
+      return;
+    }
+    const rows = lines.slice(1).map(parseCsvLine);
+    const imported = [];
+    for (const row of rows) {
+      const [dateText, typeText, departmentText, categoryText, itemText, vendorNameText, amountText, noteText] = row;
+      const departmentMatch = departments.find((dept) => dept.label === departmentText || dept.value === departmentText);
+      const departmentValue = departmentMatch?.value || "supermarket";
+      const typeValue = typeText === "收入" ? "income" : "expense";
+      const id = `${dateText}_${departmentValue}_${Date.now()}_${imported.length}`;
+      const record = {
+        id,
+        date: dateText,
+        type: typeValue,
+        category: categoryText || "",
+        categoryId: categoryText || "",
+        item: itemText || "",
+        department: departmentValue,
+        amount: Number(String(amountText || "0").replaceAll(",", "")) || 0,
+        note: noteText || "",
+        vendorId: "",
+        vendorName: vendorNameText || "",
+        createdBy: currentUser.id,
+      };
+      await setDoc(doc(db, "dailyCash", id), { ...record, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      imported.push(record);
+    }
+    setDailyCashData((prev) => {
+      const next = { ...prev };
+      imported.forEach((record) => {
+        next[record.department] = [record, ...(next[record.department] || [])];
+      });
+      return next;
+    });
+    setImportMessage(`已匯入 ${imported.length} 筆每日記帳資料。`);
+    event.target.value = "";
+  }
   const incomeTotal = visibleRecords.filter((r) => r.type === "income").reduce((s, r) => s + Number(r.amount || 0), 0);
   const expenseTotal = visibleRecords.filter((r) => r.type === "expense").reduce((s, r) => s + Number(r.amount || 0), 0);
   const adminIncome = adminDayRecords.filter((r) => r.type === "income").reduce((s, r) => s + Number(r.amount || 0), 0);
   const adminExpense = adminDayRecords.filter((r) => r.type === "expense").reduce((s, r) => s + Number(r.amount || 0), 0);
-  return <div className="space-y-5">{successMessage && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/30 px-6"><div className="w-full max-w-sm rounded-[28px] bg-white p-6 text-center shadow-xl"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[#06C755]/10 text-2xl font-black text-[#06C755]">✓</div><h3 className="mt-4 text-xl font-black text-gray-950">記帳成功</h3><p className="mt-2 text-sm font-bold text-gray-400">{successMessage}，可繼續新增下一筆。</p><button type="button" onClick={() => setSuccessMessage("")} className="mt-5 w-full rounded-2xl bg-[#06C755] px-4 py-3 font-black text-white">繼續記帳</button></div></div>}<PageHeader title="每日記帳" subtitle={isAdmin ? "老闆可查每天全部部門明細。" : "員工只能每日記帳與查看當日明細。"} icon={ICONS.wallet} /><Card className="space-y-5"><div className="grid grid-cols-2 rounded-2xl border border-[#06C755] bg-white p-1"><button type="button" onClick={() => handleTypeChange("expense")} className={`rounded-xl px-4 py-3 font-black ${entryType === "expense" ? "bg-red-500 text-white" : "text-red-500"}`}>支出</button><button type="button" onClick={() => handleTypeChange("income")} className={`rounded-xl px-4 py-3 font-black ${entryType === "income" ? "bg-[#06C755] text-white" : "text-[#06C755]"}`}>收入</button></div><Field label="日期"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field><Field label="細項分類"><Select value={category} onChange={(e) => handleCategoryChange(e.target.value)}>{categoryOptions.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</Select></Field><Field label="記帳項目">{isManualItem ? <Input value={entryItem} onChange={(e) => setEntryItem(e.target.value)} placeholder={entryType === "expense" ? "請輸入其他支出項目" : "請輸入其他收入項目"} /> : <Select value={entryItem} onChange={(e) => handleEntryItemChange(e.target.value)}>{itemOptions.map((item) => <option key={item} value={item}>{item}</option>)}</Select>}</Field>{showCashVendorSelect && <Field label="現結貨款廠商"><SearchableVendorSelect value={vendorId} onChange={handleVendorChange} vendors={cashVendors} departments={departments} placeholder="輸入現結廠商名稱或代碼搜尋" /></Field>}<Field label="歸帳部門"><Select value={department} onChange={(e) => setDepartment(e.target.value)} disabled={!isAdmin && currentUser.department !== "all"}>{availableDepartments.some((d) => d.value === department) ? null : <option value={department}>{getDepartmentLabel(department, departments)}</option>}{availableDepartments.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}</Select></Field><Field label="金額"><Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field><Field label="備註"><Input value={note} onChange={(e) => setNote(e.target.value)} /></Field><PrimaryButton type="button" onClick={saveEntry}>儲存本筆記帳</PrimaryButton></Card><Card className="overflow-hidden p-0"><div className="border-b border-gray-100 p-5"><div className="flex items-center justify-between"><div><h2 className="font-black text-gray-950">當日明細</h2><p className="mt-1 text-xs font-bold text-gray-400">{date}｜{getDepartmentLabel(department, departments)}</p></div><div className="text-right text-xs font-black"><p className="text-[#06C755]">收入 {money(incomeTotal)}</p><p className="mt-1 text-red-500">支出 {money(expenseTotal)}</p></div></div></div>{renderDetailList(visibleRecords, false)}</Card>{isAdmin && <Card className="overflow-hidden p-0"><div className="border-b border-gray-100 p-5"><div className="flex items-center justify-between"><div><h2 className="font-black text-gray-950">現金帳明細</h2><p className="mt-1 text-xs font-bold text-gray-400">{adminQueryDate}｜全部部門</p></div><div className="text-right text-xs font-black"><p className="text-[#06C755]">收入 {money(adminIncome)}</p><p className="mt-1 text-red-500">支出 {money(adminExpense)}</p></div></div></div><div className="border-b border-gray-100 px-5 py-4"><Field label="查詢日期"><Input type="date" value={adminQueryDate} onChange={(e) => { setExpandedEntryKey(""); setEntryDrafts({}); setAdminQueryDate(e.target.value || getTodayDate()); }} /></Field></div>{renderDetailList(adminDayRecords, true)}</Card>}</div>;
+  return <div className="space-y-5">{successMessage && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/30 px-6"><div className="w-full max-w-sm rounded-[28px] bg-white p-6 text-center shadow-xl"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[#06C755]/10 text-2xl font-black text-[#06C755]">✓</div><h3 className="mt-4 text-xl font-black text-gray-950">記帳成功</h3><p className="mt-2 text-sm font-bold text-gray-400">{successMessage}，可繼續新增下一筆。</p><button type="button" onClick={() => setSuccessMessage("")} className="mt-5 w-full rounded-2xl bg-[#06C755] px-4 py-3 font-black text-white">繼續記帳</button></div></div>}<PageHeader title="每日記帳" subtitle={isAdmin ? "老闆可查每天全部部門明細。" : "員工只能每日記帳與查看當日明細。"} icon={ICONS.wallet} /><Card className="space-y-5"><div className="grid grid-cols-2 rounded-2xl border border-[#06C755] bg-white p-1"><button type="button" onClick={() => handleTypeChange("expense")} className={`rounded-xl px-4 py-3 font-black ${entryType === "expense" ? "bg-red-500 text-white" : "text-red-500"}`}>支出</button><button type="button" onClick={() => handleTypeChange("income")} className={`rounded-xl px-4 py-3 font-black ${entryType === "income" ? "bg-[#06C755] text-white" : "text-[#06C755]"}`}>收入</button></div><Field label="日期"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field><Field label="細項分類"><Select value={category} onChange={(e) => handleCategoryChange(e.target.value)}>{categoryOptions.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</Select></Field><Field label="記帳項目">{isManualItem ? <Input value={entryItem} onChange={(e) => setEntryItem(e.target.value)} placeholder={entryType === "expense" ? "請輸入其他支出項目" : "請輸入其他收入項目"} /> : <Select value={entryItem} onChange={(e) => handleEntryItemChange(e.target.value)}>{itemOptions.map((item) => <option key={item} value={item}>{item}</option>)}</Select>}</Field>{showCashVendorSelect && <Field label="現結貨款廠商"><SearchableVendorSelect value={vendorId} onChange={handleVendorChange} vendors={cashVendors} departments={departments} placeholder="輸入現結廠商名稱或代碼搜尋" /></Field>}<Field label="歸帳部門"><Select value={department} onChange={(e) => setDepartment(e.target.value)} disabled={!isAdmin && currentUser.department !== "all"}>{availableDepartments.some((d) => d.value === department) ? null : <option value={department}>{getDepartmentLabel(department, departments)}</option>}{availableDepartments.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}</Select></Field><Field label="金額"><Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field><Field label="備註"><Input value={note} onChange={(e) => setNote(e.target.value)} /></Field><PrimaryButton type="button" onClick={saveEntry}>儲存本筆記帳</PrimaryButton></Card><Card className="space-y-4"><div><h2 className="font-black text-gray-950">資料匯出 / 匯入</h2><p className="mt-1 text-xs font-bold text-gray-400">可輸出日期區間 CSV，也可匯入固定格式的每日記帳檔案。</p></div><div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><Field label="開始日期"><Input type="date" value={exportStartDate} onChange={(e) => setExportStartDate(e.target.value)} /></Field><Field label="結束日期"><Input type="date" value={exportEndDate} onChange={(e) => setExportEndDate(e.target.value)} /></Field></div><Field label="部門"><Select value={exportDepartment} onChange={(e) => setExportDepartment(e.target.value)}><option value="all">全部部門</option>{departments.map((dept) => <option key={dept.value} value={dept.value}>{dept.label}</option>)}</Select></Field><div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><PrimaryButton type="button" onClick={exportRangeCsv}>輸出日期區間檔案</PrimaryButton><label className="flex cursor-pointer items-center justify-center rounded-2xl bg-[#06C755]/10 px-4 py-3 text-sm font-black text-[#06C755]"><input type="file" accept=".csv,text/csv" className="hidden" onChange={handleImportFile} />匯入 CSV 檔案</label></div>{importMessage && <div className="rounded-2xl bg-[#06C755]/10 p-3 text-sm font-bold text-[#06C755]">{importMessage}</div>}<div className="rounded-2xl bg-gray-50 p-3 text-xs font-bold text-gray-500">匯入格式：日期｜類型｜部門｜細項分類｜記帳項目｜廠商｜金額｜備註</div></Card><Card className="overflow-hidden p-0"><div className="border-b border-gray-100 p-5"><div className="flex items-center justify-between"><div><h2 className="font-black text-gray-950">當日明細</h2><p className="mt-1 text-xs font-bold text-gray-400">{date}｜{getDepartmentLabel(department, departments)}</p></div><div className="text-right text-xs font-black"><p className="text-[#06C755]">收入 {money(incomeTotal)}</p><p className="mt-1 text-red-500">支出 {money(expenseTotal)}</p></div></div></div>{renderDetailList(visibleRecords, false)}</Card>{isAdmin && <Card className="overflow-hidden p-0"><div className="border-b border-gray-100 p-5"><div className="flex items-center justify-between"><div><h2 className="font-black text-gray-950">現金帳明細</h2><p className="mt-1 text-xs font-bold text-gray-400">{adminQueryDate}｜全部部門</p></div><div className="text-right text-xs font-black"><p className="text-[#06C755]">收入 {money(adminIncome)}</p><p className="mt-1 text-red-500">支出 {money(adminExpense)}</p></div></div></div><div className="border-b border-gray-100 px-5 py-4"><Field label="查詢日期"><Input type="date" value={adminQueryDate} onChange={(e) => { setExpandedEntryKey(""); setEntryDrafts({}); setAdminQueryDate(e.target.value || getTodayDate()); }} /></Field></div>{renderDetailList(adminDayRecords, true)}</Card>}</div>;
 }
 
 function MonthlyFixed({ departments, fixedData, setFixedData, fixedRecords, setFixedRecords }) {
