@@ -72,6 +72,8 @@ const firebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
 const auth = getAuth(firebaseApp);
 const db = getFirestore(firebaseApp);
 
+// Legacy compatibility fallback for the existing production deployment.
+// New deployments receive departments and categories from /api/bootstrap and Firestore.
 const DEFAULT_DEPARTMENTS = [
   { value: "bakery", label: "烘焙部", revenueMode: "cash", commissionRate: 0 },
   { value: "supermarket", label: "超市部", revenueMode: "cash", commissionRate: 0 },
@@ -115,57 +117,6 @@ const DEFAULT_DAILY_CATEGORIES = {
     ],
   },
 };
-
-const initialDailyCash = {
-  bakery: [
-    { date: "2026-05-01", type: "income", category: "現金收入", item: "門市現金", department: "bakery", amount: 12800, note: "母親節預購收入" },
-    { date: "2026-05-01", type: "expense", category: "現結貨款", item: "原物料進貨", department: "bakery", amount: 3200, vendorId: "vendor_003", vendorName: "現結水果行", note: "母親節備料" },
-    { date: "2026-05-04", type: "income", category: "轉帳收入", item: "銀行轉帳", department: "bakery", amount: 18200, note: "團購出貨" },
-    { date: "2026-05-04", type: "expense", category: "現結貨款", item: "原物料進貨", department: "bakery", amount: 5200, vendorId: "vendor_003", vendorName: "現結水果行", note: "鮮奶油與水果" },
-  ],
-  supermarket: [
-    { date: "2026-05-01", type: "income", category: "現金收入", item: "門市現金", department: "supermarket", amount: 42800, note: "超市門市收入" },
-    { date: "2026-05-01", type: "expense", category: "現結貨款", item: "飲料食品貨款", department: "supermarket", amount: 8600, vendorId: "vendor_004", vendorName: "現結包材行", note: "日用品進貨" },
-    { date: "2026-05-04", type: "income", category: "現金收入", item: "門市現金", department: "supermarket", amount: 37100, note: "一般營業" },
-    { date: "2026-05-04", type: "expense", category: "營運支出", item: "設備維修", department: "supermarket", amount: 6800, note: "冷藏櫃維修" },
-  ],
-  lottery: [
-    { date: "2026-05-01", type: "income", category: "現金收入", item: "門市現金", department: "lottery", amount: 22800, note: "彩券銷售" },
-    { date: "2026-05-01", type: "expense", category: "營運支出", item: "廣告行銷", department: "lottery", amount: 1800, note: "活動看板" },
-    { date: "2026-05-04", type: "income", category: "現金收入", item: "門市現金", department: "lottery", amount: 19700, note: "一般營業" },
-    { date: "2026-05-04", type: "expense", category: "營運支出", item: "清潔用品", department: "lottery", amount: 1300, note: "環境整理" },
-  ],
-};
-
-const initialFixed = {
-  bakery: [{ label: "租金", amount: 18000 }, { label: "人事費", amount: 56000 }, { label: "電費", amount: 8800 }],
-  supermarket: [{ label: "租金", amount: 42000 }, { label: "人事費", amount: 92000 }, { label: "冷藏電費", amount: 16800 }],
-  lottery: [{ label: "櫃位租金", amount: 12000 }, { label: "人事費", amount: 36000 }, { label: "系統費", amount: 3000 }],
-};
-
-const initialFixedRecords = [
-  { id: "fixed_2026_05_bakery", month: "2026-05", department: "bakery", items: initialFixed.bakery },
-  { id: "fixed_2026_05_supermarket", month: "2026-05", department: "supermarket", items: initialFixed.supermarket },
-  { id: "fixed_2026_05_lottery", month: "2026-05", department: "lottery", items: initialFixed.lottery },
-];
-
-const initialVendors = [
-  { id: "vendor_001", vendorCode: "A001", vendorName: "大成原物料", type: "monthly", department: "bakery", deductPercent: 3 },
-  { id: "vendor_002", vendorCode: "B018", vendorName: "日用品批發商", type: "monthly", department: "supermarket", deductPercent: 0 },
-  { id: "vendor_003", vendorCode: "C006", vendorName: "現結水果行", type: "cash", department: "bakery", deductPercent: 0 },
-  { id: "vendor_004", vendorCode: "D012", vendorName: "現結包材行", type: "cash", department: "supermarket", deductPercent: 0 },
-];
-
-const initialVendorBills = [
-  { id: "bill_001", vendorId: "vendor_001", vendorCode: "A001", vendorName: "大成原物料", department: "bakery", deductPercent: 3, startDate: "2026-05-01", endDate: "2026-05-31", note: "五月烘焙原料月結", billTotal: 48600, paymentMethod: "支票", checkNumber: "CK202605001", ticketStatus: "arrived" },
-  { id: "bill_002", vendorId: "vendor_002", vendorCode: "B018", vendorName: "日用品批發商", department: "supermarket", deductPercent: 0, startDate: "2026-05-01", endDate: "2026-05-31", note: "超市日用品月結", billTotal: 73900, paymentMethod: "現金", checkNumber: "", ticketStatus: "none" },
-];
-
-const initialUsers = [
-  { id: "Uadminxxxx001", name: "老闆", role: "admin", department: "all" },
-  { id: "U9a01xxxxbakery", name: "小林", role: "staff", department: "bakery" },
-  { id: "U3b22xxxxmarket", name: "阿美", role: "staff", department: "supermarket" },
-];
 
 function getTodayDate() { const now = new Date(); const year = now.getFullYear(); const month = String(now.getMonth() + 1).padStart(2, "0"); const day = String(now.getDate()).padStart(2, "0"); return `${year}-${month}-${day}`; }
 function money(value) { return `$${Number(value || 0).toLocaleString()}`; }
