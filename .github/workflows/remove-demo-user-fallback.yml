@@ -1,0 +1,39 @@
+name: Remove demo user fallback
+
+on:
+  push:
+    branches:
+      - agent/generalize-deployment-settings
+    paths:
+      - .github/workflows/remove-demo-user-fallback.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove fallback and workflow
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          app = Path('src/App.jsx')
+          text = app.read_text()
+          old = 'const displayedUsers = users?.length ? users : initialUsers;'
+          new = 'const displayedUsers = users || [];'
+          if old not in text:
+              raise SystemExit('Expected demo-user fallback was not found')
+          app.write_text(text.replace(old, new, 1))
+          Path('.github/workflows/remove-demo-user-fallback.yml').unlink()
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/App.jsx .github/workflows/remove-demo-user-fallback.yml
+          git commit -m "Remove demo users from universal deployments"
+          git push origin HEAD:agent/generalize-deployment-settings
