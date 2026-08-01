@@ -31,22 +31,41 @@ const PIE_COLORS = ["#06C755", "#00A5FF", "#FFB020", "#8B5CF6", "#EF4444"];
 // ============================================================================
 // 正式部署連線設定
 // ---------------------------------------------------------------------------
-// 這份檔案可以直接覆蓋 GitHub 的 src/App.jsx。
-// Firebase Web Config 可以公開在前端；Service Account 私鑰只放 Vercel Environment Variables。
-// LINE userId 正式版由 liff.getProfile().userId 動態取得，不寫死。
+// 所有部署差異均由 Vercel Environment Variables 提供，GitHub 只保留程式碼與變數名稱。
+// 注意：VITE_* 變數會被打包至瀏覽器，適合 Firebase Web Config 與 LIFF ID，不能存放私鑰。
+// FIREBASE_SERVICE_ACCOUNT 屬於伺服器端機密，只能放在 Vercel，且不得使用 VITE_ 前綴。
 // ============================================================================
+const runtimeEnv = import.meta.env;
+
 const firebaseConfig = {
-  apiKey: "AIzaSyDolam_OIhFPGFlgibKcs1U8gr6KQXfplg",
-  authDomain: "finance-system-52d62.firebaseapp.com",
-  projectId: "finance-system-52d62",
-  storageBucket: "finance-system-52d62.firebasestorage.app",
-  messagingSenderId: "517046288884",
-  appId: "1:517046288884:web:20f6b4af7f44bcef1479a1",
+  apiKey: runtimeEnv.VITE_FIREBASE_API_KEY,
+  authDomain: runtimeEnv.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: runtimeEnv.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: runtimeEnv.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: runtimeEnv.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: runtimeEnv.VITE_FIREBASE_APP_ID,
 };
 
-// TODO：請把這裡改成你 LINE Developers 取得的 LIFF ID。
-const LIFF_ID = "2010101193-M9eYhgFD";
-const AUTH_ENDPOINT = "/api/auth";
+const LIFF_ID = runtimeEnv.VITE_LINE_LIFF_ID;
+const AUTH_ENDPOINT = runtimeEnv.VITE_AUTH_ENDPOINT || "/api/auth";
+
+const requiredRuntimeEnv = {
+  VITE_FIREBASE_API_KEY: firebaseConfig.apiKey,
+  VITE_FIREBASE_AUTH_DOMAIN: firebaseConfig.authDomain,
+  VITE_FIREBASE_PROJECT_ID: firebaseConfig.projectId,
+  VITE_FIREBASE_STORAGE_BUCKET: firebaseConfig.storageBucket,
+  VITE_FIREBASE_MESSAGING_SENDER_ID: firebaseConfig.messagingSenderId,
+  VITE_FIREBASE_APP_ID: firebaseConfig.appId,
+  VITE_LINE_LIFF_ID: LIFF_ID,
+};
+
+const missingRuntimeEnv = Object.entries(requiredRuntimeEnv)
+  .filter(([, value]) => !String(value || "").trim())
+  .map(([name]) => name);
+
+if (missingRuntimeEnv.length) {
+  throw new Error(`缺少必要環境變數：${missingRuntimeEnv.join(", ")}`);
+}
 
 const firebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
 const auth = getAuth(firebaseApp);
@@ -208,7 +227,7 @@ function normalizeDailyCashDocs(docs, departments = DEFAULT_DEPARTMENTS) { const
 function normalizeFixedDocs(docs, departments = DEFAULT_DEPARTMENTS) { const data = {}; departments.forEach((dept) => { data[dept.value] = []; }); docs.forEach((item) => { if (item.department) data[item.department] = item.items || []; }); return data; }
 async function readCollection(name) { const snap = await getDocs(collection(db, name)); return snap.docs.map((item) => ({ id: item.id, ...item.data() })); }
 async function loadSettingsFromFirestore() { const [departmentDocs, vendorDocs, dailyDocs, fixedDocs, billDocs, userDocs, requestDocs, adjustmentDocs, categorySnap] = await Promise.all([readCollection("departments"), readCollection("vendors"), readCollection("dailyCash"), readCollection("monthlyFixed"), readCollection("vendorBills"), readCollection("users"), readCollection("joinRequests"), readCollection("reportAdjustments"), getDoc(doc(db, "settings", "categories"))]); const departments = departmentDocs.length ? departmentDocs.map((entry) => ({ value: entry.value || entry.id, label: entry.label || entry.id, revenueMode: entry.revenueMode || (entry.value === "lottery" || entry.id === "lottery" ? "mixed_lottery" : "cash"), commissionRate: Number(entry.commissionRate || ((entry.value === "lottery" || entry.id === "lottery") ? 6 : 0)) })) : DEFAULT_DEPARTMENTS; const categories = categorySnap.exists() ? mergeRequiredCategories(categorySnap.data().categories || DEFAULT_DAILY_CATEGORIES) : DEFAULT_DAILY_CATEGORIES; return { departments, vendors: vendorDocs, dailyCashData: normalizeDailyCashDocs(dailyDocs, departments), fixedRecords: fixedDocs, fixedData: normalizeFixedDocs(fixedDocs, departments), vendorBills: billDocs, users: userDocs, joinRequests: requestDocs, reportAdjustments: adjustmentDocs, categories }; }
-async function loginWithLine() { if (!LIFF_ID || LIFF_ID === "請填入_LINE_LIFF_ID") throw new Error("尚未設定 LIFF ID，請先在 src/App.jsx 填入 LIFF_ID。"); await liff.init({ liffId: LIFF_ID }); if (!liff.isLoggedIn()) { liff.login(); return null; } const profile = await liff.getProfile(); const lineUserId = profile.userId; const response = await fetch(AUTH_ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lineUserId }) }); if (!response.ok) throw new Error(`登入 API 失敗：${await response.text()}`); const { token } = await response.json(); await signInWithCustomToken(auth, token); const userSnap = await getDoc(doc(db, "users", lineUserId)); return { lineUserId, profile, appUser: userSnap.exists() ? { id: lineUserId, ...userSnap.data() } : null }; }
+async function loginWithLine() { if (!LIFF_ID) throw new Error("尚未設定 LIFF ID，請先在 Vercel 設定 VITE_LINE_LIFF_ID。"); await liff.init({ liffId: LIFF_ID }); if (!liff.isLoggedIn()) { liff.login(); return null; } const profile = await liff.getProfile(); const lineUserId = profile.userId; const response = await fetch(AUTH_ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lineUserId }) }); if (!response.ok) throw new Error(`登入 API 失敗：${await response.text()}`); const { token } = await response.json(); await signInWithCustomToken(auth, token); const userSnap = await getDoc(doc(db, "users", lineUserId)); return { lineUserId, profile, appUser: userSnap.exists() ? { id: lineUserId, ...userSnap.data() } : null }; }
 function LoginScreen({ authState }) {
   const [requestName, setRequestName] = useState(authState.profile?.displayName || "");
   const [requestDepartment, setRequestDepartment] = useState(DEFAULT_DEPARTMENTS[0]?.value || "bakery");
@@ -533,7 +552,7 @@ function runSelfTests(categories, departments) {
     { name: "其他收入手動輸入", pass: getItemOptions(categories, "income", "other_revenue").length === 0 },
     { name: "超市部預設部門存在", pass: departments.some((dept) => dept.value === "supermarket") },
     { name: "今日日期格式正確", pass: /^\d{4}-\d{2}-\d{2}$/.test(getTodayDate()) },
-    { name: "Firebase projectId 已接入", pass: firebaseConfig.projectId === "finance-system-52d62" },
+    { name: "Firebase projectId 已設定", pass: Boolean(firebaseConfig.projectId) },
     { name: "登入 API 路徑正確", pass: AUTH_ENDPOINT === "/api/auth" },
     { name: "CSV 轉義正常", pass: buildCsvText([["a\"b"]]) === "\"a\"\"b\"" },
   ];
