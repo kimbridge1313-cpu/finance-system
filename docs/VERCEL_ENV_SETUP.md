@@ -29,3 +29,7 @@ Keep `FIREBASE_SERVICE_ACCOUNT` in Vercel only. Do not prefix it with `VITE_`, d
 4. Add or verify the same variables in Vercel Production.
 5. Merge only after the preview passes.
 6. Confirm the production deployment, then remove any obsolete deployment configuration.
+
+## Deployment record
+
+Production browser variables were imported on 2026-08-01. This documentation-only update triggers a clean Production rebuild so Vite can embed the Production values.
