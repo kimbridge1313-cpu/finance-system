@@ -1,0 +1,94 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDocument() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function hasUser() {
+      return signedIn() && userDocument().data.role in ['admin', 'staff'];
+    }
+
+    function isAdmin() {
+      return hasUser() && userDocument().data.role == 'admin';
+    }
+
+    function userDepartment() {
+      return userDocument().data.department;
+    }
+
+    function canWriteOwnDailyRecord() {
+      return hasUser()
+        && request.resource.data.createdBy == request.auth.uid
+        && (
+          isAdmin()
+          || userDepartment() == 'all'
+          || request.resource.data.department == userDepartment()
+        );
+    }
+
+    match /users/{userId} {
+      allow read: if hasUser();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /joinRequests/{requestId} {
+      allow create: if signedIn()
+        && requestId == request.auth.uid
+        && request.resource.data.lineUserId == request.auth.uid;
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /dailyCash/{recordId} {
+      allow read: if hasUser();
+      allow create: if canWriteOwnDailyRecord();
+      allow update: if isAdmin()
+        || (
+          hasUser()
+          && resource.data.createdBy == request.auth.uid
+          && canWriteOwnDailyRecord()
+        );
+      allow delete: if isAdmin()
+        || (hasUser() && resource.data.createdBy == request.auth.uid);
+    }
+
+    match /departments/{departmentId} {
+      allow read: if hasUser();
+      allow write: if isAdmin();
+    }
+
+    match /settings/{settingId} {
+      allow read: if hasUser();
+      allow write: if isAdmin();
+    }
+
+    match /vendors/{vendorId} {
+      allow read: if hasUser();
+      allow write: if isAdmin();
+    }
+
+    match /monthlyFixed/{recordId} {
+      allow read: if hasUser();
+      allow write: if isAdmin();
+    }
+
+    match /vendorBills/{billId} {
+      allow read: if hasUser();
+      allow write: if isAdmin();
+    }
+
+    match /reportAdjustments/{adjustmentId} {
+      allow read: if hasUser();
+      allow write: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

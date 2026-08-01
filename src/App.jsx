@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import liff from "@line/liff";
+import { UNIVERSAL_DEFAULT_CATEGORIES } from "../lib/universalDefaults.js";
 import { initializeApp, getApp, getApps } from "firebase/app";
 import { getAuth, signInWithCustomToken } from "firebase/auth";
 import {
@@ -71,6 +72,8 @@ const firebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
 const auth = getAuth(firebaseApp);
 const db = getFirestore(firebaseApp);
 
+// Legacy compatibility fallback for the existing production deployment.
+// New deployments receive departments and categories from /api/bootstrap and Firestore.
 const DEFAULT_DEPARTMENTS = [
   { value: "bakery", label: "烘焙部", revenueMode: "cash", commissionRate: 0 },
   { value: "supermarket", label: "超市部", revenueMode: "cash", commissionRate: 0 },
@@ -115,57 +118,6 @@ const DEFAULT_DAILY_CATEGORIES = {
   },
 };
 
-const initialDailyCash = {
-  bakery: [
-    { date: "2026-05-01", type: "income", category: "現金收入", item: "門市現金", department: "bakery", amount: 12800, note: "母親節預購收入" },
-    { date: "2026-05-01", type: "expense", category: "現結貨款", item: "原物料進貨", department: "bakery", amount: 3200, vendorId: "vendor_003", vendorName: "現結水果行", note: "母親節備料" },
-    { date: "2026-05-04", type: "income", category: "轉帳收入", item: "銀行轉帳", department: "bakery", amount: 18200, note: "團購出貨" },
-    { date: "2026-05-04", type: "expense", category: "現結貨款", item: "原物料進貨", department: "bakery", amount: 5200, vendorId: "vendor_003", vendorName: "現結水果行", note: "鮮奶油與水果" },
-  ],
-  supermarket: [
-    { date: "2026-05-01", type: "income", category: "現金收入", item: "門市現金", department: "supermarket", amount: 42800, note: "超市門市收入" },
-    { date: "2026-05-01", type: "expense", category: "現結貨款", item: "飲料食品貨款", department: "supermarket", amount: 8600, vendorId: "vendor_004", vendorName: "現結包材行", note: "日用品進貨" },
-    { date: "2026-05-04", type: "income", category: "現金收入", item: "門市現金", department: "supermarket", amount: 37100, note: "一般營業" },
-    { date: "2026-05-04", type: "expense", category: "營運支出", item: "設備維修", department: "supermarket", amount: 6800, note: "冷藏櫃維修" },
-  ],
-  lottery: [
-    { date: "2026-05-01", type: "income", category: "現金收入", item: "門市現金", department: "lottery", amount: 22800, note: "彩券銷售" },
-    { date: "2026-05-01", type: "expense", category: "營運支出", item: "廣告行銷", department: "lottery", amount: 1800, note: "活動看板" },
-    { date: "2026-05-04", type: "income", category: "現金收入", item: "門市現金", department: "lottery", amount: 19700, note: "一般營業" },
-    { date: "2026-05-04", type: "expense", category: "營運支出", item: "清潔用品", department: "lottery", amount: 1300, note: "環境整理" },
-  ],
-};
-
-const initialFixed = {
-  bakery: [{ label: "租金", amount: 18000 }, { label: "人事費", amount: 56000 }, { label: "電費", amount: 8800 }],
-  supermarket: [{ label: "租金", amount: 42000 }, { label: "人事費", amount: 92000 }, { label: "冷藏電費", amount: 16800 }],
-  lottery: [{ label: "櫃位租金", amount: 12000 }, { label: "人事費", amount: 36000 }, { label: "系統費", amount: 3000 }],
-};
-
-const initialFixedRecords = [
-  { id: "fixed_2026_05_bakery", month: "2026-05", department: "bakery", items: initialFixed.bakery },
-  { id: "fixed_2026_05_supermarket", month: "2026-05", department: "supermarket", items: initialFixed.supermarket },
-  { id: "fixed_2026_05_lottery", month: "2026-05", department: "lottery", items: initialFixed.lottery },
-];
-
-const initialVendors = [
-  { id: "vendor_001", vendorCode: "A001", vendorName: "大成原物料", type: "monthly", department: "bakery", deductPercent: 3 },
-  { id: "vendor_002", vendorCode: "B018", vendorName: "日用品批發商", type: "monthly", department: "supermarket", deductPercent: 0 },
-  { id: "vendor_003", vendorCode: "C006", vendorName: "現結水果行", type: "cash", department: "bakery", deductPercent: 0 },
-  { id: "vendor_004", vendorCode: "D012", vendorName: "現結包材行", type: "cash", department: "supermarket", deductPercent: 0 },
-];
-
-const initialVendorBills = [
-  { id: "bill_001", vendorId: "vendor_001", vendorCode: "A001", vendorName: "大成原物料", department: "bakery", deductPercent: 3, startDate: "2026-05-01", endDate: "2026-05-31", note: "五月烘焙原料月結", billTotal: 48600, paymentMethod: "支票", checkNumber: "CK202605001", ticketStatus: "arrived" },
-  { id: "bill_002", vendorId: "vendor_002", vendorCode: "B018", vendorName: "日用品批發商", department: "supermarket", deductPercent: 0, startDate: "2026-05-01", endDate: "2026-05-31", note: "超市日用品月結", billTotal: 73900, paymentMethod: "現金", checkNumber: "", ticketStatus: "none" },
-];
-
-const initialUsers = [
-  { id: "Uadminxxxx001", name: "老闆", role: "admin", department: "all" },
-  { id: "U9a01xxxxbakery", name: "小林", role: "staff", department: "bakery" },
-  { id: "U3b22xxxxmarket", name: "阿美", role: "staff", department: "supermarket" },
-];
-
 function getTodayDate() { const now = new Date(); const year = now.getFullYear(); const month = String(now.getMonth() + 1).padStart(2, "0"); const day = String(now.getDate()).padStart(2, "0"); return `${year}-${month}-${day}`; }
 function money(value) { return `$${Number(value || 0).toLocaleString()}`; }
 function plainMoney(value) { return Number(value || 0).toLocaleString(); }
@@ -175,8 +127,7 @@ function getDepartmentLabel(value, departments = DEFAULT_DEPARTMENTS) { if (valu
 function getDepartmentRevenueMode(value, departments = DEFAULT_DEPARTMENTS) { const config = getDepartmentConfig(value, departments); return config.revenueMode || (value === "lottery" ? "mixed_lottery" : "cash"); }
 function getDepartmentCommissionRate(value, departments = DEFAULT_DEPARTMENTS) { const config = getDepartmentConfig(value, departments); return Number(config.commissionRate || (value === "lottery" ? 6 : 0)); }
 function getRoleLabel(value) { return ROLE_OPTIONS.find((r) => r.value === value)?.label || value; }
-function mergeRequiredCategories(savedCategories) {
-  const required = DEFAULT_DAILY_CATEGORIES;
+function mergeRequiredCategories(savedCategories, required = UNIVERSAL_DEFAULT_CATEGORIES) {
   const merged = {
     expense: {
       ...(savedCategories?.expense || {}),
@@ -223,12 +174,69 @@ function normalizeDailyCashRecord(record) {
     amount: Number(record.amount || 0),
   };
 }
-function normalizeDailyCashDocs(docs, departments = DEFAULT_DEPARTMENTS) { const data = {}; departments.forEach((dept) => { data[dept.value] = []; }); docs.forEach((item) => { const normalized = normalizeDailyCashRecord(item); const dept = normalized.department || "bakery"; if (!data[dept]) data[dept] = []; data[dept].push(normalized); }); return data; }
+function normalizeDailyCashDocs(docs, departments = DEFAULT_DEPARTMENTS) { const data = {}; departments.forEach((dept) => { data[dept.value] = []; }); docs.forEach((item) => { const normalized = normalizeDailyCashRecord(item); const dept = normalized.department || departments[0]?.value || ""; if (!data[dept]) data[dept] = []; data[dept].push(normalized); }); return data; }
 function normalizeFixedDocs(docs, departments = DEFAULT_DEPARTMENTS) { const data = {}; departments.forEach((dept) => { data[dept.value] = []; }); docs.forEach((item) => { if (item.department) data[item.department] = item.items || []; }); return data; }
 async function readCollection(name) { const snap = await getDocs(collection(db, name)); return snap.docs.map((item) => ({ id: item.id, ...item.data() })); }
-async function loadSettingsFromFirestore() { const [departmentDocs, vendorDocs, dailyDocs, fixedDocs, billDocs, userDocs, requestDocs, adjustmentDocs, categorySnap] = await Promise.all([readCollection("departments"), readCollection("vendors"), readCollection("dailyCash"), readCollection("monthlyFixed"), readCollection("vendorBills"), readCollection("users"), readCollection("joinRequests"), readCollection("reportAdjustments"), getDoc(doc(db, "settings", "categories"))]); const departments = departmentDocs.length ? departmentDocs.map((entry) => ({ value: entry.value || entry.id, label: entry.label || entry.id, revenueMode: entry.revenueMode || (entry.value === "lottery" || entry.id === "lottery" ? "mixed_lottery" : "cash"), commissionRate: Number(entry.commissionRate || ((entry.value === "lottery" || entry.id === "lottery") ? 6 : 0)) })) : DEFAULT_DEPARTMENTS; const categories = categorySnap.exists() ? mergeRequiredCategories(categorySnap.data().categories || DEFAULT_DAILY_CATEGORIES) : DEFAULT_DAILY_CATEGORIES; return { departments, vendors: vendorDocs, dailyCashData: normalizeDailyCashDocs(dailyDocs, departments), fixedRecords: fixedDocs, fixedData: normalizeFixedDocs(fixedDocs, departments), vendorBills: billDocs, users: userDocs, joinRequests: requestDocs, reportAdjustments: adjustmentDocs, categories }; }
-async function loginWithLine() { if (!LIFF_ID) throw new Error("尚未設定 LIFF ID，請先在 Vercel 設定 VITE_LINE_LIFF_ID。"); await liff.init({ liffId: LIFF_ID }); if (!liff.isLoggedIn()) { liff.login(); return null; } const profile = await liff.getProfile(); const lineUserId = profile.userId; const response = await fetch(AUTH_ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lineUserId }) }); if (!response.ok) throw new Error(`登入 API 失敗：${await response.text()}`); const { token } = await response.json(); await signInWithCustomToken(auth, token); const userSnap = await getDoc(doc(db, "users", lineUserId)); return { lineUserId, profile, appUser: userSnap.exists() ? { id: lineUserId, ...userSnap.data() } : null }; }
-function LoginScreen({ authState }) {
+async function loadSettingsFromFirestore() {
+  const [departmentDocs, vendorDocs, dailyDocs, fixedDocs, billDocs, userDocs, requestDocs, adjustmentDocs, categorySnap, appSnap] = await Promise.all([
+    readCollection("departments"),
+    readCollection("vendors"),
+    readCollection("dailyCash"),
+    readCollection("monthlyFixed"),
+    readCollection("vendorBills"),
+    readCollection("users"),
+    readCollection("joinRequests"),
+    readCollection("reportAdjustments"),
+    getDoc(doc(db, "settings", "categories")),
+    getDoc(doc(db, "settings", "app")),
+  ]);
+  const isUniversalDeployment = appSnap.exists() && Boolean(appSnap.data()?.setupCompleted);
+  const requiredCategories = isUniversalDeployment ? UNIVERSAL_DEFAULT_CATEGORIES : DEFAULT_DAILY_CATEGORIES;
+  const savedCategories = categorySnap.exists() ? categorySnap.data().categories : requiredCategories;
+  const departments = departmentDocs.length ? departmentDocs.map((entry) => ({
+    value: entry.value || entry.id,
+    label: entry.label || entry.id,
+    revenueMode: entry.revenueMode || (entry.value === "lottery" || entry.id === "lottery" ? "mixed_lottery" : "cash"),
+    commissionRate: Number(entry.commissionRate || ((entry.value === "lottery" || entry.id === "lottery") ? 6 : 0)),
+  })) : DEFAULT_DEPARTMENTS;
+  const categories = mergeRequiredCategories(savedCategories || requiredCategories, requiredCategories);
+  return {
+    departments,
+    vendors: vendorDocs,
+    dailyCashData: normalizeDailyCashDocs(dailyDocs, departments),
+    fixedRecords: fixedDocs,
+    fixedData: normalizeFixedDocs(fixedDocs, departments),
+    vendorBills: billDocs,
+    users: userDocs,
+    joinRequests: requestDocs,
+    reportAdjustments: adjustmentDocs,
+    categories,
+  };
+}
+async function loginWithLine() {
+  if (!LIFF_ID) throw new Error("尚未設定 LIFF ID，請先在 Vercel 設定 VITE_LINE_LIFF_ID。");
+  await liff.init({ liffId: LIFF_ID });
+  if (!liff.isLoggedIn()) { liff.login(); return null; }
+  const idToken = liff.getIDToken();
+  if (!idToken) throw new Error("無法取得 LINE ID Token，請確認 LIFF 已啟用 openid scope。");
+  const response = await fetch(AUTH_ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ idToken }),
+  });
+  if (!response.ok) throw new Error(`登入 API 失敗：${await response.text()}`);
+  const { token, uid, profile: verifiedProfile } = await response.json();
+  await signInWithCustomToken(auth, token);
+  const lineUserId = uid;
+  const profile = {
+    userId: lineUserId,
+    displayName: verifiedProfile?.displayName || "",
+    pictureUrl: verifiedProfile?.pictureUrl || "",
+  };
+  const userSnap = await getDoc(doc(db, "users", lineUserId));
+  return { lineUserId, profile, appUser: userSnap.exists() ? { id: lineUserId, ...userSnap.data() } : null };
+}
+function LoginScreen({ authState, systemName = "企業財務系統" }) {
   const [requestName, setRequestName] = useState(authState.profile?.displayName || "");
   const [requestDepartment, setRequestDepartment] = useState(DEFAULT_DEPARTMENTS[0]?.value || "bakery");
   const [requestMessage, setRequestMessage] = useState("");
@@ -249,7 +257,7 @@ function LoginScreen({ authState }) {
     setRequestMessage("已送出加入申請，請等待管理者審核。你可以把此畫面傳給老闆確認。 ");
   }
 
-  return <div className="min-h-screen bg-[#F6F8FA] p-4"><main className="mx-auto max-w-xl pt-12"><Card><p className="text-xs font-black uppercase tracking-widest text-[#06C755]">Enterprise Finance</p><h1 className="mt-2 text-3xl font-black text-gray-950">企業財務系統</h1><p className="mt-3 text-sm leading-6 text-gray-500">系統透過 LINE LIFF 取得 LINE userId，再登入 Firebase。</p>{authState.loading && <p className="mt-5 font-bold text-gray-500">登入檢查中...</p>}{authState.error && <p className="mt-5 rounded-2xl bg-red-50 p-4 text-sm font-bold text-red-500">{authState.error}</p>}{authState.lineUserId && !authState.user && <div className="mt-5 space-y-4 rounded-2xl bg-amber-50 p-4 text-sm font-bold text-amber-700"><div>已取得 LINE userId：<span className="break-all">{authState.lineUserId}</span><br />但尚未建立員工帳號，可直接送出加入申請。</div><Field label="姓名"><Input value={requestName} onChange={(e) => setRequestName(e.target.value)} placeholder="請輸入姓名" /></Field><Field label="申請部門"><Select value={requestDepartment} onChange={(e) => setRequestDepartment(e.target.value)}>{DEFAULT_DEPARTMENTS.map((dept) => <option key={dept.value} value={dept.value}>{dept.label}</option>)}</Select></Field><PrimaryButton type="button" onClick={submitJoinRequest}>送出加入申請</PrimaryButton>{requestMessage && <p className="rounded-2xl bg-white/70 p-3 text-[#06C755]">{requestMessage}</p>}</div>}</Card></main></div>;
+  return <div className="min-h-screen bg-[#F6F8FA] p-4"><main className="mx-auto max-w-xl pt-12"><Card><p className="text-xs font-black uppercase tracking-widest text-[#06C755]">Enterprise Finance</p><h1 className="mt-2 text-3xl font-black text-gray-950">{systemName}</h1><p className="mt-3 text-sm leading-6 text-gray-500">系統透過 LINE LIFF 取得 LINE userId，再登入 Firebase。</p>{authState.loading && <p className="mt-5 font-bold text-gray-500">登入檢查中...</p>}{authState.error && <p className="mt-5 rounded-2xl bg-red-50 p-4 text-sm font-bold text-red-500">{authState.error}</p>}{authState.lineUserId && !authState.user && <div className="mt-5 space-y-4 rounded-2xl bg-amber-50 p-4 text-sm font-bold text-amber-700"><div>已取得 LINE userId：<span className="break-all">{authState.lineUserId}</span><br />但尚未建立員工帳號，可直接送出加入申請。</div><Field label="姓名"><Input value={requestName} onChange={(e) => setRequestName(e.target.value)} placeholder="請輸入姓名" /></Field><Field label="申請部門"><Select value={requestDepartment} onChange={(e) => setRequestDepartment(e.target.value)}>{DEFAULT_DEPARTMENTS.map((dept) => <option key={dept.value} value={dept.value}>{dept.label}</option>)}</Select></Field><PrimaryButton type="button" onClick={submitJoinRequest}>送出加入申請</PrimaryButton>{requestMessage && <p className="rounded-2xl bg-white/70 p-3 text-[#06C755]">{requestMessage}</p>}</div>}</Card></main></div>;
 }
 
 function normalizeDateValue(value) {
@@ -541,8 +549,7 @@ function applyReportAdjustments(summary, rows, adjustmentRecord) {
 }
 
 function runSelfTests(categories, departments) {
-  const bakery = calcDepartment("bakery", initialDailyCash, initialFixed, departments);
-  const adminNav = getVisibleNavItems(true);
+    const adminNav = getVisibleNavItems(true);
   const staffNav = getVisibleNavItems(false);
   return [
     { name: "系統名稱", pass: "企業財務系統" === "企業財務系統" },
@@ -550,7 +557,7 @@ function runSelfTests(categories, departments) {
     { name: "staff nav 一項", pass: staffNav.length === 1 },
     { name: "其他支出存在", pass: getCategoryOptions(categories, "expense").some((x) => x.id === "other_expense") },
     { name: "其他收入手動輸入", pass: getItemOptions(categories, "income", "other_revenue").length === 0 },
-    { name: "超市部預設部門存在", pass: departments.some((dept) => dept.value === "supermarket") },
+    { name: "至少一個部門存在", pass: departments.length > 0 },
     { name: "今日日期格式正確", pass: /^\d{4}-\d{2}-\d{2}$/.test(getTodayDate()) },
     { name: "Firebase projectId 已設定", pass: Boolean(firebaseConfig.projectId) },
     { name: "登入 API 路徑正確", pass: AUTH_ENDPOINT === "/api/auth" },
@@ -601,7 +608,7 @@ function ExportPanel({ exportFile, onClose }) { if (!exportFile) return null; re
 function IntegrationPanel({ currentUser }) { return <Card className="mb-5 space-y-4"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-black uppercase tracking-widest text-[#06C755]">正式登入設定</p><h2 className="mt-1 font-black text-gray-950">Firebase + LIFF + LINE userId</h2><p className="mt-1 text-xs font-bold text-gray-400">目前登入資料來自 Firestore users/{currentUser.id}</p></div><span className="rounded-full bg-[#06C755]/10 px-3 py-1 text-xs font-black text-[#06C755]">已接正式登入</span></div><div className="grid grid-cols-1 gap-2 text-xs font-bold text-gray-500"><div className="rounded-2xl bg-gray-50 p-3">Firebase projectId：{firebaseConfig.projectId}</div><div className="rounded-2xl bg-gray-50 p-3">Auth endpoint：{AUTH_ENDPOINT}</div><div className="rounded-2xl bg-gray-50 p-3">目前 LINE userId：{currentUser.id}</div></div></Card>; }
 
 function DailyCash({ currentUser, isAdmin, categories, departments, dailyCashData, setDailyCashData, vendors }) {
-  const initialDepartment = currentUser.department === "all" ? "supermarket" : currentUser.department;
+  const initialDepartment = currentUser.department === "all" ? departments[0]?.value || "" : currentUser.department;
   const expenseOptions = getCategoryOptions(categories, "expense");
   const firstExpenseCategory = expenseOptions.find((item) => item.id === "cash_purchase" || item.label === "現結貨款") || expenseOptions[0];
   const [department, setDepartment] = useState(initialDepartment);
@@ -791,7 +798,7 @@ function DailyCash({ currentUser, isAdmin, categories, departments, dailyCashDat
     for (const row of rows) {
       const [dateText, typeText, departmentText, categoryText, itemText, vendorNameText, amountText, noteText] = row;
       const departmentMatch = departments.find((dept) => dept.label === departmentText || dept.value === departmentText);
-      const departmentValue = departmentMatch?.value || "supermarket";
+      const departmentValue = departmentMatch?.value || departments[0]?.value || "";
       const typeValue = typeText === "收入" ? "income" : "expense";
       const id = `${dateText}_${departmentValue}_${Date.now()}_${imported.length}`;
       const record = {
@@ -829,7 +836,7 @@ function DailyCash({ currentUser, isAdmin, categories, departments, dailyCashDat
 }
 
 function MonthlyFixed({ departments, fixedData, setFixedData, fixedRecords, setFixedRecords }) {
-  const defaultDepartment = departments[0]?.value || "bakery";
+  const defaultDepartment = departments[0]?.value || "";
   const defaultOperatingItems = ["租金", "水電瓦斯", "設備維修", "網路電話", "廣告行銷"];
   const defaultPersonnelItems = ["正職薪資", "兼職薪資", "加班費", "獎金", "勞健保"];
 
@@ -1108,7 +1115,7 @@ function MonthlyFixed({ departments, fixedData, setFixedData, fixedRecords, setF
 function ProfitReportTable({ title, rows, onExportCsv }) { const rowClass = (kind) => kind === "final" ? "bg-orange-100 font-black" : kind === "section" ? "bg-green-100 font-black" : kind === "category" ? "bg-white font-black text-sky-700" : "bg-white text-gray-600"; return <Card className="overflow-hidden p-0"><div className="bg-slate-800 px-4 py-3 text-white"><h2 className="text-center text-base font-black">{title}</h2><button type="button" onClick={onExportCsv} className="mt-3 w-full rounded-2xl bg-white/15 px-3 py-2 text-xs font-black">輸出 CSV</button></div><div className="divide-y divide-gray-100 md:hidden">{rows.map((row, i) => <div key={i} className={`px-4 py-3 ${rowClass(row.kind)}`}><div className="flex justify-between gap-3"><div className={row.kind === "item" ? "pl-4 text-sm" : "text-sm"}>{row.kind === "item" ? `- ${row.name}` : row.name}</div><div className="text-right"><div className="font-black">{plainMoney(row.amount)}</div><div className="text-xs text-gray-500">{row.percent}</div></div></div></div>)}</div><div className="hidden overflow-x-auto md:block"><table className="w-full text-sm"><tbody>{rows.map((row, i) => <tr key={i} className={rowClass(row.kind)}><td className="border px-2 py-2">{row.kind === "item" ? `- ${row.name}` : row.name}</td><td className="border px-2 py-2 text-right">{plainMoney(row.amount)}</td><td className="border px-2 py-2 text-right">{row.percent}</td></tr>)}</tbody></table></div></Card>; }
 function ProfitLoss({ currentUser, isAdmin, departments, dailyCashData, fixedData, fixedRecords = [], vendorBills = [], reportAdjustments = [], setReportAdjustments }) {
   const [month, setMonth] = useState(() => getTodayDate().slice(0, 7));
-  const [department, setDepartment] = useState(currentUser.department === "all" ? departments[0]?.value || "bakery" : currentUser.department);
+  const [department, setDepartment] = useState(currentUser.department === "all" ? departments[0]?.value || "" : currentUser.department);
   const available = isAdmin ? departments : departments.filter((d) => d.value === currentUser.department);
   const summary = calcDepartment(department, dailyCashData, fixedData, departments, month, vendorBills, fixedRecords);
   const rows = buildProfitReportRows(department, dailyCashData, fixedData, departments, month, vendorBills, fixedRecords);
@@ -1209,7 +1216,7 @@ function VendorBills({ vendorBills, setVendorBills, vendors, departments }) {
   const monthlyVendors = vendors.filter((v) => v.type === "monthly");
   const defaultVendor = monthlyVendors[0];
   const defaultBillMonth = getTodayDate().slice(0, 7);
-  const [form, setForm] = useState({ billMonth: defaultBillMonth, vendorId: defaultVendor?.id || "", vendorCode: defaultVendor?.vendorCode || "", vendorName: defaultVendor?.vendorName || "", department: defaultVendor?.department || "bakery", deductPercent: getDeductRule(defaultVendor) || "", startDate: `${defaultBillMonth}-01`, endDate: `${defaultBillMonth}-31`, note: "", billTotal: "", paymentMethod: "現金", checkNumber: "", ticketStatus: "none" });
+  const [form, setForm] = useState({ billMonth: defaultBillMonth, vendorId: defaultVendor?.id || "", vendorCode: defaultVendor?.vendorCode || "", vendorName: defaultVendor?.vendorName || "", department: defaultVendor?.department || departments[0]?.value || "", deductPercent: getDeductRule(defaultVendor) || "", startDate: `${defaultBillMonth}-01`, endDate: `${defaultBillMonth}-31`, note: "", billTotal: "", paymentMethod: "現金", checkNumber: "", ticketStatus: "none" });
   const [filterMonth, setFilterMonth] = useState(defaultBillMonth);
   const [filterDepartment, setFilterDepartment] = useState("all");
   const [ticketFilter, setTicketFilter] = useState("all");
@@ -1331,9 +1338,34 @@ function AccountingSettings({ categories, setCategories, departments = DEFAULT_D
 
   return <div className="space-y-5"><div className="grid grid-cols-2 rounded-2xl bg-gray-50 p-1"><button type="button" onClick={() => setType("expense")} className={`rounded-xl px-4 py-3 font-black ${type === "expense" ? "bg-red-500 text-white" : "text-red-500"}`}>支出分類</button><button type="button" onClick={() => setType("income")} className={`rounded-xl px-4 py-3 font-black ${type === "income" ? "bg-[#06C755] text-white" : "text-[#06C755]"}`}>收入分類</button></div><div className="grid grid-cols-[1fr_84px] gap-2"><Input value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder="新增細項分類" /><SmallButton type="button" onClick={addCategory}>新增</SmallButton></div><p className="text-xs font-bold leading-5 text-gray-400">可為分類或記帳項目設定歸帳部門。每日記帳選到該分類 / 項目時，歸帳部門會自動連動；未設定則維持手動選擇。</p>{options.map((cat) => { const itemObjects = normalizeAccountingItems(cat.items || []); return <div key={cat.id} className="rounded-3xl border border-gray-100 p-4"><div className="grid grid-cols-[1fr_44px] gap-2"><Input value={cat.label} onChange={(e) => updateCategory(cat.id, "label", e.target.value)} /><button type="button" onClick={() => deleteCategory(cat.id)} className="rounded-2xl bg-red-50 text-red-500">×</button></div><div className="mt-3"><Field label="分類預設歸帳部門"><Select value={cat.department || ""} onChange={(e) => updateCategory(cat.id, "department", e.target.value)}><option value="">未設定，手動選擇</option>{departments.map((dept) => <option key={dept.value} value={dept.value}>{dept.label}</option>)}</Select></Field></div><div className="mt-4 space-y-2">{itemObjects.map((item, i) => <div key={`${cat.id}_${i}`} className="rounded-2xl bg-gray-50 p-3"><div className="grid grid-cols-[1fr_40px] gap-2"><Input value={item.label} onChange={(e) => updateItem(cat.id, i, "label", e.target.value)} /><button type="button" onClick={() => deleteItem(cat.id, i)} className="rounded-2xl bg-red-50 text-red-500">×</button></div><div className="mt-2"><Field label="此項目歸帳部門"><Select value={item.department || ""} onChange={(e) => updateItem(cat.id, i, "department", e.target.value)}><option value="">未設定，跟隨分類或手動</option>{departments.map((dept) => <option key={dept.value} value={dept.value}>{dept.label}</option>)}</Select></Field></div></div>)}<div className="rounded-2xl border border-dashed border-gray-200 p-3"><Input value={newItems[cat.id] || ""} onChange={(e) => setNewItems((p) => ({ ...p, [cat.id]: e.target.value }))} placeholder="新增記帳項目" /><div className="mt-2 grid grid-cols-[1fr_84px] gap-2"><Select value={newItemDepartments[cat.id] || ""} onChange={(e) => setNewItemDepartments((p) => ({ ...p, [cat.id]: e.target.value }))}><option value="">未設定部門</option>{departments.map((dept) => <option key={dept.value} value={dept.value}>{dept.label}</option>)}</Select><SmallButton type="button" onClick={() => addItem(cat.id)}>新增</SmallButton></div></div></div></div>; })}</div>;
 }
-function DepartmentSettings({ departments, setDepartments, setDailyCashData, setFixedData }) { const [name, setName] = useState(""); function add() { if (!name.trim()) return; const value = name.trim().toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "") || `department_${Date.now()}`; setDepartments((p) => [...p, { value, label: name.trim() }]); setDailyCashData((p) => ({ ...p, [value]: [] })); setFixedData((p) => ({ ...p, [value]: [] })); setName(""); } return <div className="space-y-4"><div className="grid grid-cols-[1fr_84px] gap-2"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="新增部門" /><SmallButton type="button" onClick={add}>新增</SmallButton></div>{departments.map((d, i) => <div key={d.value} className="rounded-3xl border border-gray-100 p-4"><Field label="部門名稱"><Input value={d.label} onChange={(e) => setDepartments((p) => p.map((x, idx) => idx === i ? { ...x, label: e.target.value } : x))} /></Field><Field label="部門代碼"><Input value={d.value} onChange={(e) => setDepartments((p) => p.map((x, idx) => idx === i ? { ...x, value: e.target.value } : x))} /></Field></div>)}</div>; }
+function DepartmentSettings({ departments, setDepartments, setDailyCashData, setFixedData }) {
+  const [name, setName] = useState("");
+
+  async function add() {
+    const label = name.trim();
+    if (!label) return;
+    const value = label.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "") || `department_${Date.now()}`;
+    const record = { value, label, revenueMode: "cash", commissionRate: 0 };
+    await setDoc(doc(db, "departments", value), { ...record, updatedAt: serverTimestamp() }, { merge: true });
+    setDepartments((previous) => previous.some((department) => department.value === value) ? previous : [...previous, record]);
+    setDailyCashData((previous) => ({ ...previous, [value]: previous[value] || [] }));
+    setFixedData((previous) => ({ ...previous, [value]: previous[value] || [] }));
+    setName("");
+  }
+
+  async function updateLabel(department, label) {
+    setDepartments((previous) => previous.map((item) => item.value === department.value ? { ...item, label } : item));
+    await setDoc(doc(db, "departments", department.value), {
+      ...department,
+      label,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  }
+
+  return <div className="space-y-4"><div className="grid grid-cols-[1fr_84px] gap-2"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="新增部門" /><SmallButton type="button" onClick={add}>新增</SmallButton></div><p className="text-xs font-bold leading-5 text-gray-400">部門代碼建立後固定不變，避免既有記帳、月結與報表資料失去對應。</p>{departments.map((department) => <div key={department.value} className="rounded-3xl border border-gray-100 p-4"><Field label="部門名稱"><Input value={department.label} onChange={(e) => updateLabel(department, e.target.value)} /></Field><Field label="部門代碼"><Input value={department.value} readOnly className="bg-gray-100 text-gray-400" /></Field></div>)}</div>;
+}
 function VendorManagement({ vendors, setVendors, departments }) {
-  const empty = { vendorCode: "", vendorName: "", type: "cash", department: departments[0]?.value || "bakery", deductRule: "" };
+  const empty = { vendorCode: "", vendorName: "", type: "cash", department: departments[0]?.value || "", deductRule: "" };
   const [form, setForm] = useState(empty);
   const [filter, setFilter] = useState("cash");
   const [expandedVendorId, setExpandedVendorId] = useState("");
@@ -1400,7 +1432,7 @@ function VendorManagement({ vendors, setVendors, departments }) {
 特殊品項不扣`} /></Field></div><Field label="廠商名稱"><Input value={draft.vendorName} onChange={(e) => updateVendorDraft(v.id, "vendorName", e.target.value)} /></Field><Field label="對應部門"><Select value={draft.department} onChange={(e) => updateVendorDraft(v.id, "department", e.target.value)}>{departments.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}</Select></Field><Field label="廠商類型"><Select value={draft.type} onChange={(e) => updateVendorDraft(v.id, "type", e.target.value)}><option value="cash">現結廠商</option><option value="monthly">月結廠商</option></Select></Field><div className="grid grid-cols-2 gap-2"><PrimaryButton type="button" onClick={() => saveVendorEdit(v.id)}>儲存修改</PrimaryButton><SmallButton type="button" tone="gray" className="rounded-2xl py-3" onClick={() => setExpandedVendorId("")}>收合</SmallButton></div></div>}</div>; })}</div></div>; }
 function UserManagement({ departments, users, setUsers, joinRequests, setJoinRequests }) {
   const [expanded, setExpanded] = useState("");
-  const [newUser, setNewUser] = useState({ id: "", name: "", role: "staff", department: departments[0]?.value || "bakery" });
+  const [newUser, setNewUser] = useState({ id: "", name: "", role: "staff", department: departments[0]?.value || "" });
 
   async function saveUser(userRecord) {
     if (!userRecord.id?.trim()) return;
@@ -1420,7 +1452,7 @@ function UserManagement({ departments, users, setUsers, joinRequests, setJoinReq
   }
 
   async function approveRequest(request) {
-    const nextUser = { id: request.lineUserId || request.id, name: request.name || "未命名員工", role: "staff", department: request.department || departments[0]?.value || "bakery" };
+    const nextUser = { id: request.lineUserId || request.id, name: request.name || "未命名員工", role: "staff", department: request.department || departments[0]?.value || "" };
     await saveUser(nextUser);
     await setDoc(doc(db, "joinRequests", request.id), { status: "approved", approvedAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true });
     setJoinRequests((prev) => prev.filter((item) => item.id !== request.id));
@@ -1432,13 +1464,13 @@ function UserManagement({ departments, users, setUsers, joinRequests, setJoinReq
   }
 
   const pendingRequests = (joinRequests || []).filter((item) => item.status !== "approved" && item.status !== "rejected");
-  const displayedUsers = users?.length ? users : initialUsers;
+  const displayedUsers = users || [];
 
-  return <div className="space-y-5"><Card className="space-y-4 bg-gray-50 shadow-none ring-0"><h3 className="font-black text-gray-950">新增員工</h3><Field label="LINE userId"><Input value={newUser.id} onChange={(e) => setNewUser((prev) => ({ ...prev, id: e.target.value }))} placeholder="例如：U66f9f183c8a6df1d673d909b7b60a2de" /></Field><Field label="姓名"><Input value={newUser.name} onChange={(e) => setNewUser((prev) => ({ ...prev, name: e.target.value }))} placeholder="請輸入員工姓名" /></Field><div className="grid grid-cols-2 gap-2"><Field label="角色"><Select value={newUser.role} onChange={(e) => setNewUser((prev) => ({ ...prev, role: e.target.value, department: e.target.value === "admin" ? "all" : prev.department }))}>{ROLE_OPTIONS.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}</Select></Field><Field label="部門"><Select value={newUser.department} onChange={(e) => setNewUser((prev) => ({ ...prev, department: e.target.value }))} disabled={newUser.role === "admin"}><option value="all">全部部門</option>{departments.map((dept) => <option key={dept.value} value={dept.value}>{dept.label}</option>)}</Select></Field></div><PrimaryButton type="button" onClick={() => { saveUser(newUser); setNewUser({ id: "", name: "", role: "staff", department: departments[0]?.value || "bakery" }); }}>新增員工</PrimaryButton></Card>{pendingRequests.length > 0 && <Card className="space-y-3"><h3 className="font-black text-gray-950">新員工加入申請</h3>{pendingRequests.map((request) => <div key={request.id} className="rounded-3xl border border-gray-100 p-4"><p className="font-black text-gray-950">{request.name || "未命名員工"}</p><p className="mt-1 break-all text-xs font-bold text-gray-400">LINE userId：{request.lineUserId || request.id}</p><p className="mt-1 text-xs font-bold text-gray-400">申請部門：{getDepartmentLabel(request.department, departments)}</p><div className="mt-3 grid grid-cols-2 gap-2"><SmallButton type="button" onClick={() => approveRequest(request)} className="rounded-2xl py-3">核准加入</SmallButton><SmallButton type="button" tone="red" onClick={() => rejectRequest(request)} className="rounded-2xl py-3">拒絕</SmallButton></div></div>)}</Card>}<div className="space-y-3">{displayedUsers.map((u, i) => <Card key={u.id} className="p-0"><button type="button" onClick={() => setExpanded(expanded === u.id ? "" : u.id)} className="flex w-full justify-between p-5 text-left"><div><p className="font-black">{u.name}</p><p className="break-all text-xs font-bold text-gray-400">{u.id}</p><p className="mt-1 text-xs font-bold text-gray-400">{getRoleLabel(u.role)}｜{getDepartmentLabel(u.department, departments)}</p></div><span>{ICONS.chevron}</span></button>{expanded === u.id && <div className="space-y-3 bg-gray-50 p-5"><Field label="LINE userId"><Input value={u.id} readOnly className="bg-gray-100 text-gray-400" /></Field><Field label="姓名"><Input value={u.name} onChange={(e) => setUsers((p) => p.map((x) => x.id === u.id ? { ...x, name: e.target.value } : x))} /></Field><Field label="角色"><Select value={u.role} onChange={(e) => setUsers((p) => p.map((x) => x.id === u.id ? { ...x, role: e.target.value, department: e.target.value === "admin" ? "all" : x.department } : x))}>{ROLE_OPTIONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}</Select></Field><Field label="部門"><Select value={u.department} onChange={(e) => setUsers((p) => p.map((x) => x.id === u.id ? { ...x, department: e.target.value } : x))}><option value="all">全部部門</option>{departments.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}</Select></Field><div className="grid grid-cols-2 gap-2"><PrimaryButton type="button" onClick={() => saveUser(u)}>儲存修改</PrimaryButton><SmallButton type="button" tone="red" className="rounded-2xl py-3" onClick={() => deleteUser(u.id)}>刪除</SmallButton></div></div>}</Card>)}</div></div>;
+  return <div className="space-y-5"><Card className="space-y-4 bg-gray-50 shadow-none ring-0"><h3 className="font-black text-gray-950">新增員工</h3><Field label="LINE userId"><Input value={newUser.id} onChange={(e) => setNewUser((prev) => ({ ...prev, id: e.target.value }))} placeholder="例如：U66f9f183c8a6df1d673d909b7b60a2de" /></Field><Field label="姓名"><Input value={newUser.name} onChange={(e) => setNewUser((prev) => ({ ...prev, name: e.target.value }))} placeholder="請輸入員工姓名" /></Field><div className="grid grid-cols-2 gap-2"><Field label="角色"><Select value={newUser.role} onChange={(e) => setNewUser((prev) => ({ ...prev, role: e.target.value, department: e.target.value === "admin" ? "all" : prev.department }))}>{ROLE_OPTIONS.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}</Select></Field><Field label="部門"><Select value={newUser.department} onChange={(e) => setNewUser((prev) => ({ ...prev, department: e.target.value }))} disabled={newUser.role === "admin"}><option value="all">全部部門</option>{departments.map((dept) => <option key={dept.value} value={dept.value}>{dept.label}</option>)}</Select></Field></div><PrimaryButton type="button" onClick={() => { saveUser(newUser); setNewUser({ id: "", name: "", role: "staff", department: departments[0]?.value || "" }); }}>新增員工</PrimaryButton></Card>{pendingRequests.length > 0 && <Card className="space-y-3"><h3 className="font-black text-gray-950">新員工加入申請</h3>{pendingRequests.map((request) => <div key={request.id} className="rounded-3xl border border-gray-100 p-4"><p className="font-black text-gray-950">{request.name || "未命名員工"}</p><p className="mt-1 break-all text-xs font-bold text-gray-400">LINE userId：{request.lineUserId || request.id}</p><p className="mt-1 text-xs font-bold text-gray-400">申請部門：{getDepartmentLabel(request.department, departments)}</p><div className="mt-3 grid grid-cols-2 gap-2"><SmallButton type="button" onClick={() => approveRequest(request)} className="rounded-2xl py-3">核准加入</SmallButton><SmallButton type="button" tone="red" onClick={() => rejectRequest(request)} className="rounded-2xl py-3">拒絕</SmallButton></div></div>)}</Card>}<div className="space-y-3">{displayedUsers.map((u, i) => <Card key={u.id} className="p-0"><button type="button" onClick={() => setExpanded(expanded === u.id ? "" : u.id)} className="flex w-full justify-between p-5 text-left"><div><p className="font-black">{u.name}</p><p className="break-all text-xs font-bold text-gray-400">{u.id}</p><p className="mt-1 text-xs font-bold text-gray-400">{getRoleLabel(u.role)}｜{getDepartmentLabel(u.department, departments)}</p></div><span>{ICONS.chevron}</span></button>{expanded === u.id && <div className="space-y-3 bg-gray-50 p-5"><Field label="LINE userId"><Input value={u.id} readOnly className="bg-gray-100 text-gray-400" /></Field><Field label="姓名"><Input value={u.name} onChange={(e) => setUsers((p) => p.map((x) => x.id === u.id ? { ...x, name: e.target.value } : x))} /></Field><Field label="角色"><Select value={u.role} onChange={(e) => setUsers((p) => p.map((x) => x.id === u.id ? { ...x, role: e.target.value, department: e.target.value === "admin" ? "all" : x.department } : x))}>{ROLE_OPTIONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}</Select></Field><Field label="部門"><Select value={u.department} onChange={(e) => setUsers((p) => p.map((x) => x.id === u.id ? { ...x, department: e.target.value } : x))}><option value="all">全部部門</option>{departments.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}</Select></Field><div className="grid grid-cols-2 gap-2"><PrimaryButton type="button" onClick={() => saveUser(u)}>儲存修改</PrimaryButton><SmallButton type="button" tone="red" className="rounded-2xl py-3" onClick={() => deleteUser(u.id)}>刪除</SmallButton></div></div>}</Card>)}</div></div>;
 }
 function SettingsPage({ categories, setCategories, departments, setDepartments, setDailyCashData, setFixedData, vendors, setVendors, users, setUsers, joinRequests, setJoinRequests }) { const [open, setOpen] = useState("accounting"); return <div className="space-y-5"><PageHeader title="設定" subtitle="管理記帳、廠商、部門與員工。" icon={ICONS.settings} /><AccordionSection title="記帳設定" subtitle="分類與項目" icon={ICONS.wallet} open={open === "accounting"} onToggle={() => setOpen(open === "accounting" ? "" : "accounting")}><AccountingSettings categories={categories} setCategories={setCategories} departments={departments} /></AccordionSection><AccordionSection title="廠商管理" subtitle="現結與月結廠商" icon={ICONS.vendor} open={open === "vendors"} onToggle={() => setOpen(open === "vendors" ? "" : "vendors")}><VendorManagement vendors={vendors} setVendors={setVendors} departments={departments} /></AccordionSection><AccordionSection title="部門管理" subtitle="新增與修改部門" icon={ICONS.settings} open={open === "departments"} onToggle={() => setOpen(open === "departments" ? "" : "departments")}><DepartmentSettings departments={departments} setDepartments={setDepartments} setDailyCashData={setDailyCashData} setFixedData={setFixedData} /></AccordionSection><AccordionSection title="員工管理" subtitle="員工可輸入 LINE userId，也可審核新員工申請" icon={ICONS.settings} open={open === "users"} onToggle={() => setOpen(open === "users" ? "" : "users")}><UserManagement departments={departments} users={users} setUsers={setUsers} joinRequests={joinRequests} setJoinRequests={setJoinRequests} /></AccordionSection></div>; }
 
-export default function App() {
+export default function App({ systemName = "企業財務系統" }) {
   const [authState, setAuthState] = useState({ loading: true, error: "", lineUserId: "", profile: null, user: null });
   const [page, setPage] = useState("daily");
   const [categories, setCategories] = useState(mergeRequiredCategories(DEFAULT_DAILY_CATEGORIES));
@@ -1460,7 +1492,7 @@ export default function App() {
   useEffect(() => { let mounted = true; async function boot() { try { const result = await loginWithLine(); if (!mounted || !result) return; setAuthState({ loading: false, error: "", lineUserId: result.lineUserId, profile: result.profile, user: result.appUser }); if (!result.appUser) return; const data = await loadSettingsFromFirestore(); if (!mounted) return; setDepartments(data.departments); setCategories(mergeRequiredCategories(data.categories)); setVendors(data.vendors); setDailyCashData(data.dailyCashData); setFixedData(data.fixedData); setFixedRecords(data.fixedRecords); setVendorBills(data.vendorBills); setUsers(data.users || []); setJoinRequests(data.joinRequests || []);
       setReportAdjustments(data.reportAdjustments || []); } catch (error) { if (!mounted) return; setAuthState((prev) => ({ ...prev, loading: false, error: error.message || "登入失敗" })); } } boot(); return () => { mounted = false; }; }, []);
 
-  if (authState.loading || authState.error || !currentUser) return <LoginScreen authState={authState} />;
+  if (authState.loading || authState.error || !currentUser) return <LoginScreen authState={authState} systemName={systemName} />;
   function setAdminPage(nextPage) { if (!isAdmin && nextPage !== "daily") return; setPage(nextPage); }
-  return <div className="min-h-screen bg-[#F6F8FA] pb-24 text-gray-950"><div className="sticky top-0 z-40 border-b border-gray-100 bg-white/95 backdrop-blur"><div className="mx-auto flex max-w-xl items-center px-4 py-3"><div><p className="text-xs font-black uppercase tracking-widest text-[#06C755]">Enterprise Finance</p><p className="text-sm font-black text-gray-950">企業財務系統</p></div></div></div><main className="mx-auto max-w-xl px-4 py-5"><ExportPanel exportFile={exportFile} onClose={() => setExportFile(null)} />{page === "daily" && <DailyCash currentUser={currentUser} isAdmin={isAdmin} categories={categories} departments={departments} dailyCashData={dailyCashData} setDailyCashData={setDailyCashData} vendors={vendors} />}{page === "reports" && isAdmin && <ReportsPage departments={departments} dailyCashData={dailyCashData} fixedData={fixedData} fixedRecords={fixedRecords} vendorBills={vendorBills} reportAdjustments={reportAdjustments} setReportAdjustments={setReportAdjustments} />}{page === "monthly-fixed" && isAdmin && <MonthlyFixed departments={departments} fixedData={fixedData} setFixedData={setFixedData} fixedRecords={fixedRecords} setFixedRecords={setFixedRecords} />}{page === "vendor-bills" && isAdmin && <VendorBills vendorBills={vendorBills} setVendorBills={setVendorBills} vendors={vendors} departments={departments} />}{page === "settings" && isAdmin && <SettingsPage categories={categories} setCategories={setCategories} departments={departments} setDepartments={setDepartments} setDailyCashData={setDailyCashData} setFixedData={setFixedData} vendors={vendors} setVendors={setVendors} users={users} setUsers={setUsers} joinRequests={joinRequests} setJoinRequests={setJoinRequests} />}</main><NavBar page={page} setPage={setAdminPage} isAdmin={isAdmin} /></div>;
+  return <div className="min-h-screen bg-[#F6F8FA] pb-24 text-gray-950"><div className="sticky top-0 z-40 border-b border-gray-100 bg-white/95 backdrop-blur"><div className="mx-auto flex max-w-xl items-center px-4 py-3"><div><p className="text-xs font-black uppercase tracking-widest text-[#06C755]">Enterprise Finance</p><p className="text-sm font-black text-gray-950">{systemName}</p></div></div></div><main className="mx-auto max-w-xl px-4 py-5"><ExportPanel exportFile={exportFile} onClose={() => setExportFile(null)} />{page === "daily" && <DailyCash currentUser={currentUser} isAdmin={isAdmin} categories={categories} departments={departments} dailyCashData={dailyCashData} setDailyCashData={setDailyCashData} vendors={vendors} />}{page === "reports" && isAdmin && <ReportsPage departments={departments} dailyCashData={dailyCashData} fixedData={fixedData} fixedRecords={fixedRecords} vendorBills={vendorBills} reportAdjustments={reportAdjustments} setReportAdjustments={setReportAdjustments} />}{page === "monthly-fixed" && isAdmin && <MonthlyFixed departments={departments} fixedData={fixedData} setFixedData={setFixedData} fixedRecords={fixedRecords} setFixedRecords={setFixedRecords} />}{page === "vendor-bills" && isAdmin && <VendorBills vendorBills={vendorBills} setVendorBills={setVendorBills} vendors={vendors} departments={departments} />}{page === "settings" && isAdmin && <SettingsPage categories={categories} setCategories={setCategories} departments={departments} setDepartments={setDepartments} setDailyCashData={setDailyCashData} setFixedData={setFixedData} vendors={vendors} setVendors={setVendors} users={users} setUsers={setUsers} joinRequests={joinRequests} setJoinRequests={setJoinRequests} />}</main><NavBar page={page} setPage={setAdminPage} isAdmin={isAdmin} /></div>;
 }
