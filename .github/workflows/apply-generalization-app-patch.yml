@@ -1,0 +1,100 @@
+name: Apply universal app compatibility patch
+
+on:
+  push:
+    branches:
+      - agent/generalize-deployment-settings
+    paths:
+      - .github/workflows/apply-generalization-app-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-app:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch App.jsx
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          app_path = Path("src/App.jsx")
+          workflow_path = Path(".github/workflows/apply-generalization-app-patch.yml")
+          text = app_path.read_text()
+
+          login_pattern = re.compile(
+              r'async function loginWithLine\(\) \{.*?\nfunction LoginScreen\(\{ authState \}\) \{',
+              re.S,
+          )
+          login_replacement = '''async function loginWithLine() {
+            if (!LIFF_ID) throw new Error("尚未設定 LIFF ID，請先在 Vercel 設定 VITE_LINE_LIFF_ID。");
+            await liff.init({ liffId: LIFF_ID });
+            if (!liff.isLoggedIn()) { liff.login(); return null; }
+            const idToken = liff.getIDToken();
+            if (!idToken) throw new Error("無法取得 LINE ID Token，請確認 LIFF 已啟用 openid scope。");
+            const response = await fetch(AUTH_ENDPOINT, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ idToken }),
+            });
+            if (!response.ok) throw new Error(`登入 API 失敗：${await response.text()}`);
+            const { token, uid, profile: verifiedProfile } = await response.json();
+            await signInWithCustomToken(auth, token);
+            const lineUserId = uid;
+            const profile = {
+              userId: lineUserId,
+              displayName: verifiedProfile?.displayName || "",
+              pictureUrl: verifiedProfile?.pictureUrl || "",
+            };
+            const userSnap = await getDoc(doc(db, "users", lineUserId));
+            return { lineUserId, profile, appUser: userSnap.exists() ? { id: lineUserId, ...userSnap.data() } : null };
+          }
+          function LoginScreen({ authState, systemName = "企業財務系統" }) {'''
+
+          text, count = login_pattern.subn(login_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f"Expected one loginWithLine block, replaced {count}")
+
+          replacements = [
+              (
+                  '<h1 className="mt-2 text-3xl font-black text-gray-950">企業財務系統</h1>',
+                  '<h1 className="mt-2 text-3xl font-black text-gray-950">{systemName}</h1>',
+              ),
+              (
+                  'export default function App() {',
+                  'export default function App({ systemName = "企業財務系統" }) {',
+              ),
+              (
+                  'return <LoginScreen authState={authState} />;',
+                  'return <LoginScreen authState={authState} systemName={systemName} />;',
+              ),
+              (
+                  '<p className="text-sm font-black text-gray-950">企業財務系統</p>',
+                  '<p className="text-sm font-black text-gray-950">{systemName}</p>',
+              ),
+          ]
+
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f"Missing expected App.jsx anchor: {old}")
+              text = text.replace(old, new, 1)
+
+          app_path.write_text(text)
+          workflow_path.unlink()
+          PY
+
+      - name: Commit compatibility patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/App.jsx .github/workflows/apply-generalization-app-patch.yml
+          git commit -m "Use verified LINE token and deployment name"
+          git push origin HEAD:agent/generalize-deployment-settings
