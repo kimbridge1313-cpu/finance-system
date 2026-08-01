@@ -1353,7 +1353,32 @@ function AccountingSettings({ categories, setCategories, departments = DEFAULT_D
 
   return <div className="space-y-5"><div className="grid grid-cols-2 rounded-2xl bg-gray-50 p-1"><button type="button" onClick={() => setType("expense")} className={`rounded-xl px-4 py-3 font-black ${type === "expense" ? "bg-red-500 text-white" : "text-red-500"}`}>支出分類</button><button type="button" onClick={() => setType("income")} className={`rounded-xl px-4 py-3 font-black ${type === "income" ? "bg-[#06C755] text-white" : "text-[#06C755]"}`}>收入分類</button></div><div className="grid grid-cols-[1fr_84px] gap-2"><Input value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder="新增細項分類" /><SmallButton type="button" onClick={addCategory}>新增</SmallButton></div><p className="text-xs font-bold leading-5 text-gray-400">可為分類或記帳項目設定歸帳部門。每日記帳選到該分類 / 項目時，歸帳部門會自動連動；未設定則維持手動選擇。</p>{options.map((cat) => { const itemObjects = normalizeAccountingItems(cat.items || []); return <div key={cat.id} className="rounded-3xl border border-gray-100 p-4"><div className="grid grid-cols-[1fr_44px] gap-2"><Input value={cat.label} onChange={(e) => updateCategory(cat.id, "label", e.target.value)} /><button type="button" onClick={() => deleteCategory(cat.id)} className="rounded-2xl bg-red-50 text-red-500">×</button></div><div className="mt-3"><Field label="分類預設歸帳部門"><Select value={cat.department || ""} onChange={(e) => updateCategory(cat.id, "department", e.target.value)}><option value="">未設定，手動選擇</option>{departments.map((dept) => <option key={dept.value} value={dept.value}>{dept.label}</option>)}</Select></Field></div><div className="mt-4 space-y-2">{itemObjects.map((item, i) => <div key={`${cat.id}_${i}`} className="rounded-2xl bg-gray-50 p-3"><div className="grid grid-cols-[1fr_40px] gap-2"><Input value={item.label} onChange={(e) => updateItem(cat.id, i, "label", e.target.value)} /><button type="button" onClick={() => deleteItem(cat.id, i)} className="rounded-2xl bg-red-50 text-red-500">×</button></div><div className="mt-2"><Field label="此項目歸帳部門"><Select value={item.department || ""} onChange={(e) => updateItem(cat.id, i, "department", e.target.value)}><option value="">未設定，跟隨分類或手動</option>{departments.map((dept) => <option key={dept.value} value={dept.value}>{dept.label}</option>)}</Select></Field></div></div>)}<div className="rounded-2xl border border-dashed border-gray-200 p-3"><Input value={newItems[cat.id] || ""} onChange={(e) => setNewItems((p) => ({ ...p, [cat.id]: e.target.value }))} placeholder="新增記帳項目" /><div className="mt-2 grid grid-cols-[1fr_84px] gap-2"><Select value={newItemDepartments[cat.id] || ""} onChange={(e) => setNewItemDepartments((p) => ({ ...p, [cat.id]: e.target.value }))}><option value="">未設定部門</option>{departments.map((dept) => <option key={dept.value} value={dept.value}>{dept.label}</option>)}</Select><SmallButton type="button" onClick={() => addItem(cat.id)}>新增</SmallButton></div></div></div></div>; })}</div>;
 }
-function DepartmentSettings({ departments, setDepartments, setDailyCashData, setFixedData }) { const [name, setName] = useState(""); function add() { if (!name.trim()) return; const value = name.trim().toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "") || `department_${Date.now()}`; setDepartments((p) => [...p, { value, label: name.trim() }]); setDailyCashData((p) => ({ ...p, [value]: [] })); setFixedData((p) => ({ ...p, [value]: [] })); setName(""); } return <div className="space-y-4"><div className="grid grid-cols-[1fr_84px] gap-2"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="新增部門" /><SmallButton type="button" onClick={add}>新增</SmallButton></div>{departments.map((d, i) => <div key={d.value} className="rounded-3xl border border-gray-100 p-4"><Field label="部門名稱"><Input value={d.label} onChange={(e) => setDepartments((p) => p.map((x, idx) => idx === i ? { ...x, label: e.target.value } : x))} /></Field><Field label="部門代碼"><Input value={d.value} onChange={(e) => setDepartments((p) => p.map((x, idx) => idx === i ? { ...x, value: e.target.value } : x))} /></Field></div>)}</div>; }
+function DepartmentSettings({ departments, setDepartments, setDailyCashData, setFixedData }) {
+  const [name, setName] = useState("");
+
+  async function add() {
+    const label = name.trim();
+    if (!label) return;
+    const value = label.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "") || `department_${Date.now()}`;
+    const record = { value, label, revenueMode: "cash", commissionRate: 0 };
+    await setDoc(doc(db, "departments", value), { ...record, updatedAt: serverTimestamp() }, { merge: true });
+    setDepartments((previous) => previous.some((department) => department.value === value) ? previous : [...previous, record]);
+    setDailyCashData((previous) => ({ ...previous, [value]: previous[value] || [] }));
+    setFixedData((previous) => ({ ...previous, [value]: previous[value] || [] }));
+    setName("");
+  }
+
+  async function updateLabel(department, label) {
+    setDepartments((previous) => previous.map((item) => item.value === department.value ? { ...item, label } : item));
+    await setDoc(doc(db, "departments", department.value), {
+      ...department,
+      label,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  }
+
+  return <div className="space-y-4"><div className="grid grid-cols-[1fr_84px] gap-2"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="新增部門" /><SmallButton type="button" onClick={add}>新增</SmallButton></div><p className="text-xs font-bold leading-5 text-gray-400">部門代碼建立後固定不變，避免既有記帳、月結與報表資料失去對應。</p>{departments.map((department) => <div key={department.value} className="rounded-3xl border border-gray-100 p-4"><Field label="部門名稱"><Input value={department.label} onChange={(e) => updateLabel(department, e.target.value)} /></Field><Field label="部門代碼"><Input value={department.value} readOnly className="bg-gray-100 text-gray-400" /></Field></div>)}</div>;
+}
 function VendorManagement({ vendors, setVendors, departments }) {
   const empty = { vendorCode: "", vendorName: "", type: "cash", department: departments[0]?.value || "bakery", deductRule: "" };
   const [form, setForm] = useState(empty);
