@@ -1,0 +1,34 @@
+name: Emergency restore production App
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/emergency-restore-production.yml
+
+permissions:
+  contents: write
+
+jobs:
+  restore-app:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore last known-good App.jsx
+        run: |
+          git checkout 0d8014e4a1c758b7a8a6f0f1229f139d414a7864 -- src/App.jsx
+          if git diff --quiet; then
+            echo "App.jsx already matches the last known-good version."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/App.jsx
+          git commit -m "Restore production App after missing env variables"
+          git push origin HEAD:main
