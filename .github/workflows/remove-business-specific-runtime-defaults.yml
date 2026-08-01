@@ -1,0 +1,62 @@
+name: Remove business-specific runtime defaults
+
+on:
+  push:
+    branches:
+      - agent/generalize-deployment-settings
+    paths:
+      - .github/workflows/remove-business-specific-runtime-defaults.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Replace runtime defaults
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/App.jsx')
+          text = path.read_text()
+          replacements = {
+            'const dept = normalized.department || "bakery";': 'const dept = normalized.department || departments[0]?.value || "";',
+            'const bakery = calcDepartment("bakery", initialDailyCash, initialFixed, departments);\n': '',
+            '{ name: "超市部預設部門存在", pass: departments.some((dept) => dept.value === "supermarket") },': '{ name: "至少一個部門存在", pass: departments.length > 0 },',
+            'const initialDepartment = currentUser.department === "all" ? "supermarket" : currentUser.department;': 'const initialDepartment = currentUser.department === "all" ? departments[0]?.value || "" : currentUser.department;',
+            'const departmentValue = departmentMatch?.value || "supermarket";': 'const departmentValue = departmentMatch?.value || departments[0]?.value || "";',
+            'const defaultDepartment = departments[0]?.value || "bakery";': 'const defaultDepartment = departments[0]?.value || "";',
+            'department: defaultVendor?.department || "bakery"': 'department: defaultVendor?.department || departments[0]?.value || ""',
+            'department: departments[0]?.value || "bakery", deductRule: ""': 'department: departments[0]?.value || "", deductRule: ""',
+            'department: request.department || departments[0]?.value || "bakery"': 'department: request.department || departments[0]?.value || ""',
+            'department: departments[0]?.value || "bakery" });': 'department: departments[0]?.value || "" });',
+            'departments[0]?.value || "bakery" : currentUser.department': 'departments[0]?.value || "" : currentUser.department',
+          }
+
+          for old, new in replacements.items():
+            if old in text:
+              text = text.replace(old, new)
+
+          forbidden = [
+            'const initialDepartment = currentUser.department === "all" ? "supermarket"',
+            'const departmentValue = departmentMatch?.value || "supermarket"',
+            'const defaultDepartment = departments[0]?.value || "bakery"',
+          ]
+          for value in forbidden:
+            if value in text:
+              raise SystemExit(f'Business-specific runtime fallback remains: {value}')
+
+          path.write_text(text)
+          Path('.github/workflows/remove-business-specific-runtime-defaults.yml').unlink()
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/App.jsx .github/workflows/remove-business-specific-runtime-defaults.yml
+          git commit -m "Use deployment departments for runtime defaults"
+          git push origin HEAD:agent/generalize-deployment-settings
