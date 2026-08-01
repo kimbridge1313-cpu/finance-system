@@ -1,0 +1,108 @@
+name: Apply universal category defaults
+
+on:
+  push:
+    branches:
+      - agent/generalize-deployment-settings
+    paths:
+      - .github/workflows/apply-universal-category-defaults.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply shared universal defaults
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          bootstrap_path = Path('api/bootstrap.js')
+          bootstrap = bootstrap_path.read_text()
+          bootstrap = bootstrap.replace(
+            'import { getAdmin } from "../lib/firebaseAdmin.js";\n',
+            'import { getAdmin } from "../lib/firebaseAdmin.js";\nimport { UNIVERSAL_DEFAULT_CATEGORIES } from "../lib/universalDefaults.js";\n',
+            1,
+          )
+          bootstrap, count = re.subn(
+            r'\nconst DEFAULT_CATEGORIES = \{.*?\n\};\n\nfunction normalizeDepartmentCode',
+            '\nfunction normalizeDepartmentCode',
+            bootstrap,
+            count=1,
+            flags=re.S,
+          )
+          if count != 1:
+            raise SystemExit(f'Expected one bootstrap category block, removed {count}')
+          bootstrap = bootstrap.replace('categories: DEFAULT_CATEGORIES,', 'categories: UNIVERSAL_DEFAULT_CATEGORIES,')
+          bootstrap_path.write_text(bootstrap)
+
+          app_path = Path('src/App.jsx')
+          app = app_path.read_text()
+          app = app.replace(
+            'import liff from "@line/liff";\n',
+            'import liff from "@line/liff";\nimport { UNIVERSAL_DEFAULT_CATEGORIES } from "../lib/universalDefaults.js";\n',
+            1,
+          )
+          app = app.replace(
+            'function mergeRequiredCategories(savedCategories) {\n  const required = DEFAULT_DAILY_CATEGORIES;',
+            'function mergeRequiredCategories(savedCategories, required = UNIVERSAL_DEFAULT_CATEGORIES) {',
+            1,
+          )
+
+          load_pattern = re.compile(r'async function loadSettingsFromFirestore\(\) \{.*?\nasync function loginWithLine', re.S)
+          load_replacement = '''async function loadSettingsFromFirestore() {
+            const [departmentDocs, vendorDocs, dailyDocs, fixedDocs, billDocs, userDocs, requestDocs, adjustmentDocs, categorySnap, appSnap] = await Promise.all([
+              readCollection("departments"),
+              readCollection("vendors"),
+              readCollection("dailyCash"),
+              readCollection("monthlyFixed"),
+              readCollection("vendorBills"),
+              readCollection("users"),
+              readCollection("joinRequests"),
+              readCollection("reportAdjustments"),
+              getDoc(doc(db, "settings", "categories")),
+              getDoc(doc(db, "settings", "app")),
+            ]);
+            const isUniversalDeployment = appSnap.exists() && Boolean(appSnap.data()?.setupCompleted);
+            const requiredCategories = isUniversalDeployment ? UNIVERSAL_DEFAULT_CATEGORIES : DEFAULT_DAILY_CATEGORIES;
+            const savedCategories = categorySnap.exists() ? categorySnap.data().categories : requiredCategories;
+            const departments = departmentDocs.length ? departmentDocs.map((entry) => ({
+              value: entry.value || entry.id,
+              label: entry.label || entry.id,
+              revenueMode: entry.revenueMode || (entry.value === "lottery" || entry.id === "lottery" ? "mixed_lottery" : "cash"),
+              commissionRate: Number(entry.commissionRate || ((entry.value === "lottery" || entry.id === "lottery") ? 6 : 0)),
+            })) : DEFAULT_DEPARTMENTS;
+            const categories = mergeRequiredCategories(savedCategories || requiredCategories, requiredCategories);
+            return {
+              departments,
+              vendors: vendorDocs,
+              dailyCashData: normalizeDailyCashDocs(dailyDocs, departments),
+              fixedRecords: fixedDocs,
+              fixedData: normalizeFixedDocs(fixedDocs, departments),
+              vendorBills: billDocs,
+              users: userDocs,
+              joinRequests: requestDocs,
+              reportAdjustments: adjustmentDocs,
+              categories,
+            };
+          }
+          async function loginWithLine'''
+          app, count = load_pattern.subn(lambda _: load_replacement, app, count=1)
+          if count != 1:
+            raise SystemExit(f'Expected one settings loader, replaced {count}')
+          app_path.write_text(app)
+
+          Path('.github/workflows/apply-universal-category-defaults.yml').unlink()
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add api/bootstrap.js src/App.jsx .github/workflows/apply-universal-category-defaults.yml
+          git commit -m "Separate universal and legacy accounting defaults"
+          git push origin HEAD:agent/generalize-deployment-settings
