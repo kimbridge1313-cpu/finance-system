@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import liff from "@line/liff";
+import { UNIVERSAL_DEFAULT_CATEGORIES } from "../lib/universalDefaults.js";
 import { initializeApp, getApp, getApps } from "firebase/app";
 import { getAuth, signInWithCustomToken } from "firebase/auth";
 import {
@@ -175,8 +176,7 @@ function getDepartmentLabel(value, departments = DEFAULT_DEPARTMENTS) { if (valu
 function getDepartmentRevenueMode(value, departments = DEFAULT_DEPARTMENTS) { const config = getDepartmentConfig(value, departments); return config.revenueMode || (value === "lottery" ? "mixed_lottery" : "cash"); }
 function getDepartmentCommissionRate(value, departments = DEFAULT_DEPARTMENTS) { const config = getDepartmentConfig(value, departments); return Number(config.commissionRate || (value === "lottery" ? 6 : 0)); }
 function getRoleLabel(value) { return ROLE_OPTIONS.find((r) => r.value === value)?.label || value; }
-function mergeRequiredCategories(savedCategories) {
-  const required = DEFAULT_DAILY_CATEGORIES;
+function mergeRequiredCategories(savedCategories, required = UNIVERSAL_DEFAULT_CATEGORIES) {
   const merged = {
     expense: {
       ...(savedCategories?.expense || {}),
@@ -226,7 +226,42 @@ function normalizeDailyCashRecord(record) {
 function normalizeDailyCashDocs(docs, departments = DEFAULT_DEPARTMENTS) { const data = {}; departments.forEach((dept) => { data[dept.value] = []; }); docs.forEach((item) => { const normalized = normalizeDailyCashRecord(item); const dept = normalized.department || departments[0]?.value || ""; if (!data[dept]) data[dept] = []; data[dept].push(normalized); }); return data; }
 function normalizeFixedDocs(docs, departments = DEFAULT_DEPARTMENTS) { const data = {}; departments.forEach((dept) => { data[dept.value] = []; }); docs.forEach((item) => { if (item.department) data[item.department] = item.items || []; }); return data; }
 async function readCollection(name) { const snap = await getDocs(collection(db, name)); return snap.docs.map((item) => ({ id: item.id, ...item.data() })); }
-async function loadSettingsFromFirestore() { const [departmentDocs, vendorDocs, dailyDocs, fixedDocs, billDocs, userDocs, requestDocs, adjustmentDocs, categorySnap] = await Promise.all([readCollection("departments"), readCollection("vendors"), readCollection("dailyCash"), readCollection("monthlyFixed"), readCollection("vendorBills"), readCollection("users"), readCollection("joinRequests"), readCollection("reportAdjustments"), getDoc(doc(db, "settings", "categories"))]); const departments = departmentDocs.length ? departmentDocs.map((entry) => ({ value: entry.value || entry.id, label: entry.label || entry.id, revenueMode: entry.revenueMode || (entry.value === "lottery" || entry.id === "lottery" ? "mixed_lottery" : "cash"), commissionRate: Number(entry.commissionRate || ((entry.value === "lottery" || entry.id === "lottery") ? 6 : 0)) })) : DEFAULT_DEPARTMENTS; const categories = categorySnap.exists() ? mergeRequiredCategories(categorySnap.data().categories || DEFAULT_DAILY_CATEGORIES) : DEFAULT_DAILY_CATEGORIES; return { departments, vendors: vendorDocs, dailyCashData: normalizeDailyCashDocs(dailyDocs, departments), fixedRecords: fixedDocs, fixedData: normalizeFixedDocs(fixedDocs, departments), vendorBills: billDocs, users: userDocs, joinRequests: requestDocs, reportAdjustments: adjustmentDocs, categories }; }
+async function loadSettingsFromFirestore() {
+  const [departmentDocs, vendorDocs, dailyDocs, fixedDocs, billDocs, userDocs, requestDocs, adjustmentDocs, categorySnap, appSnap] = await Promise.all([
+    readCollection("departments"),
+    readCollection("vendors"),
+    readCollection("dailyCash"),
+    readCollection("monthlyFixed"),
+    readCollection("vendorBills"),
+    readCollection("users"),
+    readCollection("joinRequests"),
+    readCollection("reportAdjustments"),
+    getDoc(doc(db, "settings", "categories")),
+    getDoc(doc(db, "settings", "app")),
+  ]);
+  const isUniversalDeployment = appSnap.exists() && Boolean(appSnap.data()?.setupCompleted);
+  const requiredCategories = isUniversalDeployment ? UNIVERSAL_DEFAULT_CATEGORIES : DEFAULT_DAILY_CATEGORIES;
+  const savedCategories = categorySnap.exists() ? categorySnap.data().categories : requiredCategories;
+  const departments = departmentDocs.length ? departmentDocs.map((entry) => ({
+    value: entry.value || entry.id,
+    label: entry.label || entry.id,
+    revenueMode: entry.revenueMode || (entry.value === "lottery" || entry.id === "lottery" ? "mixed_lottery" : "cash"),
+    commissionRate: Number(entry.commissionRate || ((entry.value === "lottery" || entry.id === "lottery") ? 6 : 0)),
+  })) : DEFAULT_DEPARTMENTS;
+  const categories = mergeRequiredCategories(savedCategories || requiredCategories, requiredCategories);
+  return {
+    departments,
+    vendors: vendorDocs,
+    dailyCashData: normalizeDailyCashDocs(dailyDocs, departments),
+    fixedRecords: fixedDocs,
+    fixedData: normalizeFixedDocs(fixedDocs, departments),
+    vendorBills: billDocs,
+    users: userDocs,
+    joinRequests: requestDocs,
+    reportAdjustments: adjustmentDocs,
+    categories,
+  };
+}
 async function loginWithLine() {
   if (!LIFF_ID) throw new Error("尚未設定 LIFF ID，請先在 Vercel 設定 VITE_LINE_LIFF_ID。");
   await liff.init({ liffId: LIFF_ID });
