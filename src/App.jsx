@@ -1267,6 +1267,9 @@ function VendorBills({ vendorBills, setVendorBills, vendors, setVendors, departm
     setVoiceTranscript(result.transcript);
     setVoiceCandidates(result.candidates || []);
     setVoicePhrase(result.voicePhrase || "");
+    if (result.voicePhrase && !result.vendor?.id && !(result.candidates || []).length) {
+      updateForm("vendorId", "");
+    }
 
     const applied = [];
     if (result.vendor?.id) {
@@ -1303,6 +1306,17 @@ function VendorBills({ vendorBills, setVendorBills, vendors, setVendors, departm
     recognition.continuous = false;
     recognition.interimResults = false;
     recognition.maxAlternatives = 1;
+    try {
+      const SpeechGrammarList = window.SpeechGrammarList || window.webkitSpeechGrammarList;
+      const vendorTerms = monthlyVendors.flatMap((vendor) => [vendor.vendorName, ...(Array.isArray(vendor.voiceAliases) ? vendor.voiceAliases : [])]).map((item) => String(item || "").trim().replace(/[;|=<>]/g, "")).filter(Boolean);
+      if (SpeechGrammarList && vendorTerms.length) {
+        const grammarList = new SpeechGrammarList();
+        grammarList.addFromString(`#JSGF V1.0; grammar vendors; public <vendor> = ${vendorTerms.join(" | ")} ;`, 1);
+        recognition.grammars = grammarList;
+      }
+    } catch {
+      // Some Web Speech implementations ignore custom grammar; alias matching still works after transcription.
+    }
     recognition.onstart = () => {
       setVoiceListening(true);
       setVoiceMessage("正在聽，請說廠商名稱與日期…");
