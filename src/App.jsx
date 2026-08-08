@@ -1327,22 +1327,6 @@ function VendorBills({ vendorBills, setVendorBills, vendors, setVendors, departm
     recognition.interimResults = false;
     recognition.maxAlternatives = mode === "vendor" ? 5 : 1;
 
-    if (mode === "vendor") {
-      const vendorTerms = [...new Set(monthlyVendors.flatMap((vendor) => [
-        vendor.vendorName,
-        ...(Array.isArray(vendor.voiceAliases) ? vendor.voiceAliases : []),
-      ]).map((item) => String(item || "").trim()).filter(Boolean))];
-
-      try {
-        const SpeechRecognitionPhrase = window.SpeechRecognitionPhrase;
-        if (SpeechRecognitionPhrase && "phrases" in recognition && vendorTerms.length) {
-          recognition.phrases = vendorTerms.slice(0, 100).map((term) => new SpeechRecognitionPhrase(term, 10.0));
-        }
-      } catch (error) {
-        console.warn("Speech phrase bias unavailable", error);
-      }
-    }
-
     recognition.onstart = () => {
       setVoiceListening(mode);
       setVoiceTranscript("");
