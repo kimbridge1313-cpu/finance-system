@@ -154,18 +154,36 @@ function resolveDateRange(text, billMonth) {
   return { startDate, endDate };
 }
 
+function getVoiceAliases(vendor) {
+  if (Array.isArray(vendor?.voiceAliases)) return vendor.voiceAliases.map((item) => String(item || "").trim()).filter(Boolean);
+  if (typeof vendor?.voiceAliases === "string") return vendor.voiceAliases.split(/[\n,，、]/).map((item) => item.trim()).filter(Boolean);
+  return [];
+}
+
+function getVendorVoicePhrase(transcript) {
+  return normalizeChineseDateNumbers(transcript)
+    .replace(/(?:(?:\d{1,2})\s*月\s*)?\d{1,2}\s*(?:日|號)/g, " ")
+    .replace(/開始日期|結束日期|開始|結束|起始|截止|從|到|至|月份|月結|廠商|帳單|貨款/g, " ")
+    .replace(/[，。,.、:：;；!！?？()（）\-_/]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function findVendorMatches(transcript, vendors = []) {
   const haystack = normalizeLookupText(transcript);
+  const phrase = normalizeLookupText(getVendorVoicePhrase(transcript));
   const matches = vendors
     .map((vendor) => {
       const name = normalizeLookupText(vendor.vendorName);
       const code = normalizeLookupText(vendor.vendorCode);
-      const matchedByName = Boolean(name && haystack.includes(name));
+      const aliases = getVoiceAliases(vendor).map(normalizeLookupText).filter(Boolean);
+      const matchedAlias = aliases.find((alias) => haystack.includes(alias) || (phrase && phrase.includes(alias)));
+      const matchedByName = Boolean(name && (haystack.includes(name) || (phrase && phrase.includes(name))));
       const matchedByCode = Boolean(code && haystack.includes(code));
       return {
         vendor,
-        matched: matchedByName || matchedByCode,
-        score: matchedByCode ? 1000 + code.length : matchedByName ? name.length : 0,
+        matched: Boolean(matchedAlias || matchedByName || matchedByCode),
+        score: matchedAlias ? 3000 + matchedAlias.length : matchedByCode ? 2000 + code.length : matchedByName ? 1000 + name.length : 0,
       };
     })
     .filter((entry) => entry.matched)
@@ -199,6 +217,7 @@ export function parseVendorBillVoice({ transcript, billMonth, vendors = [] }) {
     candidates: vendorResult.candidates,
     startDate: dates.startDate,
     endDate: dates.endDate,
+    voicePhrase: getVendorVoicePhrase(cleanTranscript),
   };
 }
 
