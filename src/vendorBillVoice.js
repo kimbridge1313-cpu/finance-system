@@ -169,33 +169,77 @@ function getVendorVoicePhrase(transcript) {
     .trim();
 }
 
+function longestCommonSubstringLength(a, b) {
+  if (!a || !b) return 0;
+  const previous = new Array(b.length + 1).fill(0);
+  let best = 0;
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = new Array(b.length + 1).fill(0);
+    for (let j = 1; j <= b.length; j += 1) {
+      if (a[i - 1] === b[j - 1]) {
+        current[j] = previous[j - 1] + 1;
+        best = Math.max(best, current[j]);
+      }
+    }
+    for (let j = 0; j <= b.length; j += 1) previous[j] = current[j];
+  }
+  return best;
+}
+
+function scoreLookupTerm(query, term) {
+  if (!query || !term) return 0;
+  if (query === term) return 10000 + term.length;
+  if (query.includes(term)) return 9000 + term.length * 10;
+  if (query.length >= 2 && term.includes(query)) {
+    return 8000 + query.length * 20 - Math.max(0, term.length - query.length);
+  }
+
+  const commonLength = longestCommonSubstringLength(query, term);
+  const shorterLength = Math.min(query.length, term.length);
+  const coverage = shorterLength ? commonLength / shorterLength : 0;
+  if (commonLength >= 3 && coverage >= 0.6) {
+    return 4000 + Math.round(coverage * 1000) + commonLength * 20;
+  }
+  return 0;
+}
+
 function findVendorMatches(transcript, vendors = []) {
   const haystack = normalizeLookupText(transcript);
   const phrase = normalizeLookupText(getVendorVoicePhrase(transcript));
+  const queries = [...new Set([phrase, haystack].filter(Boolean))];
+
   const matches = vendors
     .map((vendor) => {
       const name = normalizeLookupText(vendor.vendorName);
       const code = normalizeLookupText(vendor.vendorCode);
       const aliases = getVoiceAliases(vendor).map(normalizeLookupText).filter(Boolean);
-      const matchedAlias = aliases.find((alias) => haystack.includes(alias) || (phrase && phrase.includes(alias)));
-      const matchedByName = Boolean(name && (haystack.includes(name) || (phrase && phrase.includes(name))));
-      const matchedByCode = Boolean(code && haystack.includes(code));
-      return {
-        vendor,
-        matched: Boolean(matchedAlias || matchedByName || matchedByCode),
-        score: matchedAlias ? 3000 + matchedAlias.length : matchedByCode ? 2000 + code.length : matchedByName ? 1000 + name.length : 0,
-      };
+
+      let score = 0;
+      queries.forEach((query) => {
+        score = Math.max(score, scoreLookupTerm(query, name));
+        score = Math.max(score, scoreLookupTerm(query, code) + (code ? 500 : 0));
+        aliases.forEach((alias) => {
+          score = Math.max(score, scoreLookupTerm(query, alias) + 700);
+        });
+      });
+
+      return { vendor, score };
     })
-    .filter((entry) => entry.matched)
+    .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score);
 
   if (!matches.length) return { vendor: null, candidates: [] };
   if (matches.length === 1) return { vendor: matches[0].vendor, candidates: [] };
 
-  const topScore = matches[0].score;
-  const topMatches = matches.filter((entry) => entry.score === topScore);
-  if (topMatches.length === 1) return { vendor: topMatches[0].vendor, candidates: [] };
-  return { vendor: null, candidates: topMatches.slice(0, 4).map((entry) => entry.vendor) };
+  const top = matches[0];
+  const second = matches[1];
+  const scoreGap = top.score - second.score;
+
+  if (top.score >= 9000) return { vendor: top.vendor, candidates: [] };
+  if (top.score >= 8000 && scoreGap >= 250) return { vendor: top.vendor, candidates: [] };
+  if (top.score >= 4500 && scoreGap >= 180) return { vendor: top.vendor, candidates: [] };
+
+  return { vendor: null, candidates: matches.slice(0, 4).map((entry) => entry.vendor) };
 }
 
 export function getSpeechRecognitionConstructor() {
