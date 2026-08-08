@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import liff from "@line/liff";
+import { getMonthDefaultRange, getSpeechRecognitionConstructor, isSpeechRecognitionSupported, parseVendorBillVoice } from "./vendorBillVoice.js";
 import { UNIVERSAL_DEFAULT_CATEGORIES } from "../lib/universalDefaults.js";
 import { initializeApp, getApp, getApps } from "firebase/app";
 import { getAuth, signInWithCustomToken } from "firebase/auth";
@@ -1216,17 +1217,104 @@ function VendorBills({ vendorBills, setVendorBills, vendors, departments }) {
   const monthlyVendors = vendors.filter((v) => v.type === "monthly");
   const defaultVendor = monthlyVendors[0];
   const defaultBillMonth = getTodayDate().slice(0, 7);
-  const [form, setForm] = useState({ billMonth: defaultBillMonth, vendorId: defaultVendor?.id || "", vendorCode: defaultVendor?.vendorCode || "", vendorName: defaultVendor?.vendorName || "", department: defaultVendor?.department || departments[0]?.value || "", deductPercent: getDeductRule(defaultVendor) || "", startDate: `${defaultBillMonth}-01`, endDate: `${defaultBillMonth}-31`, note: "", billTotal: "", paymentMethod: "現金", checkNumber: "", ticketStatus: "none" });
+  const defaultBillRange = getMonthDefaultRange(defaultBillMonth);
+  const [form, setForm] = useState({ billMonth: defaultBillMonth, vendorId: defaultVendor?.id || "", vendorCode: defaultVendor?.vendorCode || "", vendorName: defaultVendor?.vendorName || "", department: defaultVendor?.department || departments[0]?.value || "", deductPercent: getDeductRule(defaultVendor) || "", startDate: defaultBillRange.startDate, endDate: defaultBillRange.endDate, note: "", billTotal: "", paymentMethod: "現金", checkNumber: "", ticketStatus: "none" });
   const [filterMonth, setFilterMonth] = useState(defaultBillMonth);
   const [filterDepartment, setFilterDepartment] = useState("all");
   const [ticketFilter, setTicketFilter] = useState("all");
   const [checkLast3, setCheckLast3] = useState("");
   const [expandedId, setExpandedId] = useState("");
   const [drafts, setDrafts] = useState({});
+  const [voiceListening, setVoiceListening] = useState(false);
+  const [voiceTranscript, setVoiceTranscript] = useState("");
+  const [voiceMessage, setVoiceMessage] = useState("");
+  const [voiceCandidates, setVoiceCandidates] = useState([]);
+  const speechSupported = isSpeechRecognitionSupported();
 
   function getBillMonth(bill) { return bill.billMonth || String(bill.startDate || "").slice(0, 7); }
   function paymentDefaults(source) { return source.paymentMethod === "支票" ? { ...source, ticketStatus: source.ticketStatus && source.ticketStatus !== "none" ? source.ticketStatus : "pending" } : { ...source, checkNumber: "", ticketStatus: "none" }; }
-  function updateForm(field, value) { if (field === "vendorId") { const vendor = monthlyVendors.find((v) => v.id === value); setForm((p) => ({ ...p, vendorId: value, vendorCode: vendor?.vendorCode || "", vendorName: vendor?.vendorName || "", department: vendor?.department || "", deductPercent: getDeductRule(vendor) || "" })); } else if (field === "billMonth") { setForm((p) => ({ ...p, billMonth: value })); } else setForm((p) => paymentDefaults({ ...p, [field]: value })); }
+  function updateForm(field, value) {
+    if (field === "vendorId") {
+      const vendor = monthlyVendors.find((v) => v.id === value);
+      setForm((p) => ({ ...p, vendorId: value, vendorCode: vendor?.vendorCode || "", vendorName: vendor?.vendorName || "", department: vendor?.department || "", deductPercent: getDeductRule(vendor) || "" }));
+    } else if (field === "billMonth") {
+      const range = getMonthDefaultRange(value);
+      setForm((p) => ({ ...p, billMonth: value, startDate: range.startDate, endDate: range.endDate }));
+      setFilterMonth(value);
+    } else {
+      setForm((p) => paymentDefaults({ ...p, [field]: value }));
+    }
+  }
+
+  function selectVoiceVendor(vendor) {
+    if (!vendor?.id) return;
+    updateForm("vendorId", vendor.id);
+    setVoiceCandidates([]);
+    setVoiceMessage(`已帶入廠商：${vendor.vendorCode ? `${vendor.vendorCode}｜` : ""}${vendor.vendorName}`);
+  }
+
+  function applyVoiceTranscript(transcript) {
+    const result = parseVendorBillVoice({ transcript, billMonth: form.billMonth, vendors: monthlyVendors });
+    setVoiceTranscript(result.transcript);
+    setVoiceCandidates(result.candidates || []);
+
+    const applied = [];
+    if (result.vendor?.id) {
+      updateForm("vendorId", result.vendor.id);
+      applied.push(`廠商 ${result.vendor.vendorName}`);
+    }
+    if (result.startDate) {
+      updateForm("startDate", result.startDate);
+      applied.push(`開始 ${result.startDate}`);
+    }
+    if (result.endDate) {
+      updateForm("endDate", result.endDate);
+      applied.push(`結束 ${result.endDate}`);
+    }
+
+    if (result.candidates?.length) {
+      setVoiceMessage("找到多個可能的廠商，請點選正確廠商。");
+    } else if (applied.length) {
+      setVoiceMessage(`已帶入：${applied.join("、")}`);
+    } else {
+      setVoiceMessage("有聽到內容，但沒有辨識到月結廠商或日期，請再說一次或使用手動輸入。");
+    }
+  }
+
+  function startVoiceInput() {
+    const SpeechRecognition = getSpeechRecognitionConstructor();
+    if (!SpeechRecognition) {
+      setVoiceMessage("目前這個瀏覽器不支援語音辨識，請使用手動搜尋，或改用支援語音辨識的瀏覽器開啟。");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = "zh-TW";
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.onstart = () => {
+      setVoiceListening(true);
+      setVoiceMessage("正在聽，請說廠商名稱與日期…");
+      setVoiceCandidates([]);
+    };
+    recognition.onresult = (event) => {
+      const transcript = event.results?.[0]?.[0]?.transcript || "";
+      applyVoiceTranscript(transcript);
+    };
+    recognition.onerror = (event) => {
+      const permissionDenied = event.error === "not-allowed" || event.error === "service-not-allowed";
+      setVoiceMessage(permissionDenied ? "麥克風權限未開啟，請允許麥克風後再試一次。" : `語音辨識失敗：${event.error || "unknown"}`);
+    };
+    recognition.onend = () => setVoiceListening(false);
+
+    try {
+      recognition.start();
+    } catch (error) {
+      setVoiceListening(false);
+      setVoiceMessage(`無法啟動語音辨識：${error?.message || "unknown"}`);
+    }
+  }
   async function saveBill() { if (!form.vendorId || !form.billMonth) return; const id = `bill_${Date.now()}`; const record = { ...paymentDefaults(form), id, billMonth: form.billMonth, billTotal: Number(form.billTotal || 0), deductPercent: String(form.deductPercent || ""), updatedAt: serverTimestamp() }; await setDoc(doc(db, "vendorBills", id), record); setVendorBills((prev) => [record, ...prev]); setForm((prev) => ({ ...prev, note: "", billTotal: "", checkNumber: "", ticketStatus: prev.paymentMethod === "支票" ? "pending" : "none" })); }
   function filteredBills() {
     return vendorBills.filter((b) => {
@@ -1268,7 +1356,7 @@ function VendorBills({ vendorBills, setVendorBills, vendors, departments }) {
   async function saveDraft(id) { const d = drafts[id]; const record = { ...paymentDefaults(d), billMonth: d.billMonth || getBillMonth(d), billTotal: Number(d.billTotal || 0), deductPercent: String(d.deductPercent || ""), updatedAt: serverTimestamp() }; await setDoc(doc(db, "vendorBills", id), record, { merge: true }); setVendorBills((prev) => prev.map((b) => b.id === id ? record : b)); setExpandedId(""); }
   async function toggleTicket(bill) { if (bill.paymentMethod !== "支票") return; const next = (bill.ticketStatus || "pending") === "arrived" ? "pending" : "arrived"; await setDoc(doc(db, "vendorBills", bill.id), { ticketStatus: next, updatedAt: serverTimestamp() }, { merge: true }); setVendorBills((prev) => prev.map((b) => b.id === bill.id ? { ...b, ticketStatus: next } : b)); }
   async function deleteBill(billId) { await deleteDoc(doc(db, "vendorBills", billId)); setVendorBills((prev) => prev.filter((b) => b.id !== billId)); }
-  return <div className="space-y-5"><PageHeader title="月結貨款帳單" subtitle="以結算月份檢索，不再用開始 / 結束日期判斷月份。" icon={ICONS.vendor} /><Card className="space-y-4"><Field label="結算月份"><Input type="month" value={form.billMonth} onChange={(e) => updateForm("billMonth", e.target.value)} /></Field><Field label="月結廠商"><SearchableVendorSelect value={form.vendorId} onChange={(nextVendorId) => updateForm("vendorId", nextVendorId)} vendors={monthlyVendors} departments={departments} placeholder="輸入月結廠商名稱或代碼搜尋" /></Field><Field label="扣％ / 扣款規則"><TextArea rows={3} value={form.deductPercent || "未設定"} readOnly className="bg-gray-50 text-gray-500" /></Field><div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><Field label="開始日期"><Input type="date" value={form.startDate} onChange={(e) => updateForm("startDate", e.target.value)} /></Field><Field label="結束日期"><Input type="date" value={form.endDate} onChange={(e) => updateForm("endDate", e.target.value)} /></Field></div><Field label="帳單總額"><Input type="number" value={form.billTotal} onChange={(e) => updateForm("billTotal", e.target.value)} /></Field><Field label="領款方式"><Select value={form.paymentMethod} onChange={(e) => updateForm("paymentMethod", e.target.value)}><option value="現金">現金</option><option value="支票">支票</option></Select></Field>{form.paymentMethod === "支票" && <><Field label="支票號碼"><Input value={form.checkNumber} onChange={(e) => updateForm("checkNumber", e.target.value)} /></Field><Field label="到票狀態"><Select value={form.ticketStatus || "pending"} onChange={(e) => updateForm("ticketStatus", e.target.value)}><option value="pending">未到票</option><option value="arrived">已到票</option></Select></Field></>}<Field label="帳單備註"><TextArea rows={4} value={form.note} onChange={(e) => updateForm("note", e.target.value)} placeholder="可輸入帳單備註、領款說明、特殊扣款規則等" /></Field><PrimaryButton type="button" onClick={saveBill}>新增月結貨款帳單</PrimaryButton></Card><Card className="overflow-hidden p-0"><div className="border-b border-gray-100 p-5"><div className="flex items-start justify-between"><div><h2 className="font-black text-gray-950">月結貨款帳單清單</h2><p className="mt-1 text-xs font-bold text-gray-400">檢索 {bills.length} 筆｜未到票 {pending}｜已到票 {arrived}</p></div><div className="text-right"><p className="font-black text-[#06C755]">{money(total)}</p><SmallButton type="button" onClick={exportBills}>輸出檔案</SmallButton></div></div></div><div className="space-y-3 border-b border-gray-100 p-5"><div className="grid grid-cols-2 gap-3"><Field label="結算月份"><Input type="month" value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} /></Field><Field label="部門"><Select value={filterDepartment} onChange={(e) => setFilterDepartment(e.target.value)}><option value="all">全部部門</option>{departments.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}</Select></Field></div><Field label="到票"><Select value={ticketFilter} onChange={(e) => setTicketFilter(e.target.value)}><option value="all">全部</option><option value="pending">未到票</option><option value="arrived">已到票</option><option value="none">非支票</option></Select></Field><Field label="搜尋支票後三碼"><Input value={checkLast3} onChange={(e) => setCheckLast3(e.target.value.replaceAll(" ", "").slice(0, 3))} placeholder="輸入支票後三碼，例如 168" inputMode="numeric" /></Field></div><div className="divide-y divide-gray-100">{bills.map((bill) => { const draft = drafts[bill.id]; const isTicket = bill.paymentMethod === "支票"; const ticketArrived = (bill.ticketStatus || "pending") === "arrived"; return <div key={bill.id} className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="flex flex-wrap gap-2"><span className="rounded-full bg-[#06C755]/10 px-2 py-1 text-xs font-black text-[#06C755]">{getBillMonth(bill)}</span><span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-black text-gray-500">{bill.vendorCode}</span><span className="font-black">{bill.vendorName}</span><span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-black text-gray-500">{getDepartmentLabel(bill.department, departments)}</span>{isTicket && <span className={`rounded-full px-2 py-1 text-xs font-black ${ticketArrived ? "bg-[#06C755]/10 text-[#06C755]" : "bg-orange-50 text-orange-500"}`}>{ticketArrived ? "已到票" : "未到票"}</span>}</div><p className="mt-2 text-xs text-gray-400">日期範圍：{bill.startDate || "未填"} ～ {bill.endDate || "未填"}</p><p className="mt-1 text-xs font-bold text-gray-500">領款：{bill.paymentMethod}{isTicket ? `｜票號 ${bill.checkNumber || "未填"}` : ""}</p></div><div className="text-right"><p className="font-black">{money(bill.billTotal)}</p><div className="mt-3 flex flex-col gap-2"><SmallButton type="button" tone="gray" onClick={() => startEdit(bill)}>編輯</SmallButton>{isTicket && <SmallButton type="button" onClick={() => toggleTicket(bill)}>{ticketArrived ? "改未到" : "到票追蹤"}</SmallButton>}<SmallButton type="button" tone="red" onClick={() => deleteBill(bill.id)}>刪除</SmallButton></div></div></div>{expandedId === bill.id && draft && <div className="mt-4 space-y-3 rounded-3xl bg-gray-50 p-4"><Field label="結算月份"><Input type="month" value={draft.billMonth || getBillMonth(draft)} onChange={(e) => updateDraft(bill.id, "billMonth", e.target.value)} /></Field><Field label="月結廠商"><SearchableVendorSelect value={draft.vendorId} onChange={(nextVendorId) => updateDraft(bill.id, "vendorId", nextVendorId)} vendors={monthlyVendors} departments={departments} placeholder="輸入月結廠商名稱或代碼搜尋" /></Field><Field label="扣％ / 扣款規則"><TextArea rows={3} value={draft.deductPercent || "未設定"} readOnly className="bg-gray-50 text-gray-500" /></Field><div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><Field label="開始"><Input type="date" value={draft.startDate || ""} onChange={(e) => updateDraft(bill.id, "startDate", e.target.value)} /></Field><Field label="結束"><Input type="date" value={draft.endDate || ""} onChange={(e) => updateDraft(bill.id, "endDate", e.target.value)} /></Field></div><Field label="帳單總額"><Input type="number" value={draft.billTotal} onChange={(e) => updateDraft(bill.id, "billTotal", e.target.value)} /></Field><Field label="領款方式"><Select value={draft.paymentMethod} onChange={(e) => updateDraft(bill.id, "paymentMethod", e.target.value)}><option value="現金">現金</option><option value="支票">支票</option></Select></Field>{draft.paymentMethod === "支票" && <><Field label="支票號碼"><Input value={draft.checkNumber} onChange={(e) => updateDraft(bill.id, "checkNumber", e.target.value)} /></Field><Field label="到票狀態"><Select value={draft.ticketStatus || "pending"} onChange={(e) => updateDraft(bill.id, "ticketStatus", e.target.value)}><option value="pending">未到票</option><option value="arrived">已到票</option></Select></Field></>}<Field label="帳單備註"><TextArea rows={4} value={draft.note || ""} onChange={(e) => updateDraft(bill.id, "note", e.target.value)} placeholder="可輸入帳單備註、領款說明、特殊扣款規則等" /></Field><div className="grid grid-cols-2 gap-2"><PrimaryButton type="button" onClick={() => saveDraft(bill.id)}>儲存修改</PrimaryButton><SmallButton type="button" tone="gray" onClick={() => setExpandedId("")}>收合</SmallButton></div></div>}</div>; })}</div></Card></div>;
+  return <div className="space-y-5"><PageHeader title="月結貨款帳單" subtitle="以結算月份檢索，不再用開始 / 結束日期判斷月份。" icon={ICONS.vendor} /><Card className="space-y-4"><Field label="結算月份"><Input type="month" value={form.billMonth} onChange={(e) => updateForm("billMonth", e.target.value)} /></Field><div className="rounded-3xl bg-[#06C755]/10 p-4"><div className="flex items-center justify-between gap-3"><div><p className="font-black text-gray-950">語音快速帶入</p><p className="mt-1 text-xs font-bold leading-5 text-gray-500">先選結算月份，再說「大成，7月26號到8月25號」或只說「開始7月26號，結束8月25號」。</p></div><button type="button" onClick={startVoiceInput} disabled={voiceListening || !speechSupported} className={`shrink-0 rounded-2xl px-4 py-3 text-sm font-black ${voiceListening ? "bg-red-500 text-white" : speechSupported ? "bg-[#06C755] text-white" : "bg-gray-200 text-gray-400"}`}>{voiceListening ? "聆聽中…" : "🎙 開始說話"}</button></div>{!speechSupported && <p className="mt-3 rounded-2xl bg-white/80 p-3 text-xs font-bold leading-5 text-gray-500">目前這個瀏覽器沒有提供語音辨識；月結廠商搜尋與日期手動輸入仍可正常使用。</p>}{voiceTranscript && <div className="mt-3 rounded-2xl bg-white/80 p-3"><p className="text-[11px] font-black uppercase tracking-wider text-gray-400">辨識內容</p><p className="mt-1 text-sm font-bold text-gray-700">{voiceTranscript}</p></div>}{voiceMessage && <p className="mt-3 text-xs font-black leading-5 text-[#069648]">{voiceMessage}</p>}{voiceCandidates.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{voiceCandidates.map((vendor) => <button key={vendor.id} type="button" onClick={() => selectVoiceVendor(vendor)} className="rounded-full border border-[#06C755]/30 bg-white px-3 py-2 text-xs font-black text-[#069648]">{vendor.vendorCode ? `${vendor.vendorCode}｜` : ""}{vendor.vendorName}</button>)}</div>}</div><Field label="月結廠商"><SearchableVendorSelect value={form.vendorId} onChange={(nextVendorId) => updateForm("vendorId", nextVendorId)} vendors={monthlyVendors} departments={departments} placeholder="輸入月結廠商名稱或代碼搜尋" /></Field><Field label="扣％ / 扣款規則"><TextArea rows={3} value={form.deductPercent || "未設定"} readOnly className="bg-gray-50 text-gray-500" /></Field><div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><Field label="開始日期"><Input type="date" value={form.startDate} onChange={(e) => updateForm("startDate", e.target.value)} /></Field><Field label="結束日期"><Input type="date" value={form.endDate} onChange={(e) => updateForm("endDate", e.target.value)} /></Field></div><Field label="帳單總額"><Input type="number" value={form.billTotal} onChange={(e) => updateForm("billTotal", e.target.value)} /></Field><Field label="領款方式"><Select value={form.paymentMethod} onChange={(e) => updateForm("paymentMethod", e.target.value)}><option value="現金">現金</option><option value="支票">支票</option></Select></Field>{form.paymentMethod === "支票" && <><Field label="支票號碼"><Input value={form.checkNumber} onChange={(e) => updateForm("checkNumber", e.target.value)} /></Field><Field label="到票狀態"><Select value={form.ticketStatus || "pending"} onChange={(e) => updateForm("ticketStatus", e.target.value)}><option value="pending">未到票</option><option value="arrived">已到票</option></Select></Field></>}<Field label="帳單備註"><TextArea rows={4} value={form.note} onChange={(e) => updateForm("note", e.target.value)} placeholder="可輸入帳單備註、領款說明、特殊扣款規則等" /></Field><PrimaryButton type="button" onClick={saveBill}>新增月結貨款帳單</PrimaryButton></Card><Card className="overflow-hidden p-0"><div className="border-b border-gray-100 p-5"><div className="flex items-start justify-between"><div><h2 className="font-black text-gray-950">月結貨款帳單清單</h2><p className="mt-1 text-xs font-bold text-gray-400">檢索 {bills.length} 筆｜未到票 {pending}｜已到票 {arrived}</p></div><div className="text-right"><p className="font-black text-[#06C755]">{money(total)}</p><SmallButton type="button" onClick={exportBills}>輸出檔案</SmallButton></div></div></div><div className="space-y-3 border-b border-gray-100 p-5"><div className="grid grid-cols-2 gap-3"><Field label="結算月份"><Input type="month" value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} /></Field><Field label="部門"><Select value={filterDepartment} onChange={(e) => setFilterDepartment(e.target.value)}><option value="all">全部部門</option>{departments.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}</Select></Field></div><Field label="到票"><Select value={ticketFilter} onChange={(e) => setTicketFilter(e.target.value)}><option value="all">全部</option><option value="pending">未到票</option><option value="arrived">已到票</option><option value="none">非支票</option></Select></Field><Field label="搜尋支票後三碼"><Input value={checkLast3} onChange={(e) => setCheckLast3(e.target.value.replaceAll(" ", "").slice(0, 3))} placeholder="輸入支票後三碼，例如 168" inputMode="numeric" /></Field></div><div className="divide-y divide-gray-100">{bills.map((bill) => { const draft = drafts[bill.id]; const isTicket = bill.paymentMethod === "支票"; const ticketArrived = (bill.ticketStatus || "pending") === "arrived"; return <div key={bill.id} className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="flex flex-wrap gap-2"><span className="rounded-full bg-[#06C755]/10 px-2 py-1 text-xs font-black text-[#06C755]">{getBillMonth(bill)}</span><span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-black text-gray-500">{bill.vendorCode}</span><span className="font-black">{bill.vendorName}</span><span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-black text-gray-500">{getDepartmentLabel(bill.department, departments)}</span>{isTicket && <span className={`rounded-full px-2 py-1 text-xs font-black ${ticketArrived ? "bg-[#06C755]/10 text-[#06C755]" : "bg-orange-50 text-orange-500"}`}>{ticketArrived ? "已到票" : "未到票"}</span>}</div><p className="mt-2 text-xs text-gray-400">日期範圍：{bill.startDate || "未填"} ～ {bill.endDate || "未填"}</p><p className="mt-1 text-xs font-bold text-gray-500">領款：{bill.paymentMethod}{isTicket ? `｜票號 ${bill.checkNumber || "未填"}` : ""}</p></div><div className="text-right"><p className="font-black">{money(bill.billTotal)}</p><div className="mt-3 flex flex-col gap-2"><SmallButton type="button" tone="gray" onClick={() => startEdit(bill)}>編輯</SmallButton>{isTicket && <SmallButton type="button" onClick={() => toggleTicket(bill)}>{ticketArrived ? "改未到" : "到票追蹤"}</SmallButton>}<SmallButton type="button" tone="red" onClick={() => deleteBill(bill.id)}>刪除</SmallButton></div></div></div>{expandedId === bill.id && draft && <div className="mt-4 space-y-3 rounded-3xl bg-gray-50 p-4"><Field label="結算月份"><Input type="month" value={draft.billMonth || getBillMonth(draft)} onChange={(e) => updateDraft(bill.id, "billMonth", e.target.value)} /></Field><Field label="月結廠商"><SearchableVendorSelect value={draft.vendorId} onChange={(nextVendorId) => updateDraft(bill.id, "vendorId", nextVendorId)} vendors={monthlyVendors} departments={departments} placeholder="輸入月結廠商名稱或代碼搜尋" /></Field><Field label="扣％ / 扣款規則"><TextArea rows={3} value={draft.deductPercent || "未設定"} readOnly className="bg-gray-50 text-gray-500" /></Field><div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><Field label="開始"><Input type="date" value={draft.startDate || ""} onChange={(e) => updateDraft(bill.id, "startDate", e.target.value)} /></Field><Field label="結束"><Input type="date" value={draft.endDate || ""} onChange={(e) => updateDraft(bill.id, "endDate", e.target.value)} /></Field></div><Field label="帳單總額"><Input type="number" value={draft.billTotal} onChange={(e) => updateDraft(bill.id, "billTotal", e.target.value)} /></Field><Field label="領款方式"><Select value={draft.paymentMethod} onChange={(e) => updateDraft(bill.id, "paymentMethod", e.target.value)}><option value="現金">現金</option><option value="支票">支票</option></Select></Field>{draft.paymentMethod === "支票" && <><Field label="支票號碼"><Input value={draft.checkNumber} onChange={(e) => updateDraft(bill.id, "checkNumber", e.target.value)} /></Field><Field label="到票狀態"><Select value={draft.ticketStatus || "pending"} onChange={(e) => updateDraft(bill.id, "ticketStatus", e.target.value)}><option value="pending">未到票</option><option value="arrived">已到票</option></Select></Field></>}<Field label="帳單備註"><TextArea rows={4} value={draft.note || ""} onChange={(e) => updateDraft(bill.id, "note", e.target.value)} placeholder="可輸入帳單備註、領款說明、特殊扣款規則等" /></Field><div className="grid grid-cols-2 gap-2"><PrimaryButton type="button" onClick={() => saveDraft(bill.id)}>儲存修改</PrimaryButton><SmallButton type="button" tone="gray" onClick={() => setExpandedId("")}>收合</SmallButton></div></div>}</div>; })}</div></Card></div>;
 }
 
 function AccountingSettings({ categories, setCategories, departments = DEFAULT_DEPARTMENTS }) {
