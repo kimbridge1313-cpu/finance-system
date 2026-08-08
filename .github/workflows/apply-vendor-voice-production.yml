@@ -1,0 +1,70 @@
+name: Apply vendor bill voice to production base
+
+on:
+  push:
+    branches:
+      - agent/vendor-bills-voice-production
+    paths:
+      - '.github/workflows/apply-vendor-voice-production.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/vendor-bills-voice-production
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Fetch tested source branch
+        run: git fetch origin agent/vendor-bills-voice-input:refs/remotes/origin/agent/vendor-bills-voice-input
+      - name: Copy only VendorBills component
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, subprocess
+
+          path = Path('src/App.jsx')
+          current = path.read_text()
+          source = subprocess.check_output(
+              ['git', 'show', 'origin/agent/vendor-bills-voice-input:src/App.jsx'],
+              text=True,
+          )
+
+          import_line = 'import { getMonthDefaultRange, getSpeechRecognitionConstructor, isSpeechRecognitionSupported, parseVendorBillVoice } from "./vendorBillVoice.js";'
+          if import_line not in current:
+              marker = 'import liff from "@line/liff";'
+              if marker not in current:
+                  raise SystemExit('LIFF import marker not found')
+              current = current.replace(marker, marker + '\n' + import_line, 1)
+
+          pattern = re.compile(r'function VendorBills\(\{ vendorBills, setVendorBills, vendors, departments \}\) \{.*?\n\}\n\nfunction AccountingSettings', re.S)
+          source_match = pattern.search(source)
+          current_match = pattern.search(current)
+          if not source_match:
+              raise SystemExit('Tested VendorBills component not found')
+          if not current_match:
+              raise SystemExit('Production-base VendorBills component not found')
+
+          replacement = source_match.group(0)
+          current = current[:current_match.start()] + replacement + current[current_match.end():]
+          path.write_text(current)
+          PY
+      - name: Install and build
+        run: |
+          npm ci
+          npm run build
+      - name: Commit production-base patch and remove helper workflow
+        run: |
+          rm .github/workflows/apply-vendor-voice-production.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/App.jsx src/vendorBillVoice.js .github/workflows/apply-vendor-voice-production.yml
+          git commit -m "Add vendor bill voice input on production base"
+          git push origin HEAD:agent/vendor-bills-voice-production
