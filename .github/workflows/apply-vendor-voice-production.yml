@@ -58,13 +58,13 @@ jobs:
           PY
       - name: Install and build
         run: |
-          npm ci
+          npm install --no-audit --no-fund
           npm run build
       - name: Commit production-base patch and remove helper workflow
         run: |
           rm .github/workflows/apply-vendor-voice-production.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/App.jsx src/vendorBillVoice.js .github/workflows/apply-vendor-voice-production.yml
+          git add src/App.jsx src/vendorBillVoice.js .github/workflows/apply-vendor-voice-production.yml package-lock.json
           git commit -m "Add vendor bill voice input on production base"
           git push origin HEAD:agent/vendor-bills-voice-production
