@@ -1,0 +1,39 @@
+name: Patch daily cash voice learning
+
+on:
+  push:
+    branches:
+      - agent/daily-cash-voice-learning
+    paths:
+      - .github/scripts/patch-daily-cash-voice-learning.py
+      - .github/workflows/patch-daily-cash-voice-learning.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/daily-cash-voice-learning
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Patch source
+        run: python .github/scripts/patch-daily-cash-voice-learning.py
+      - name: Install dependencies
+        run: npm install
+      - name: Build
+        run: npm run build
+      - name: Remove temporary patch files
+        run: rm -f .github/scripts/patch-daily-cash-voice-learning.py .github/workflows/patch-daily-cash-voice-learning.yml
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "Learn misheard names in daily cash voice entry"
+          git push origin HEAD:agent/daily-cash-voice-learning
