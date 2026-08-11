@@ -226,11 +226,64 @@ function getCashPurchaseRule(categories) {
   };
 }
 
+function getOtherEntryRule(categories, type, item) {
+  const options = getCategoryOptions(categories, type);
+  const expectedId = type === "income" ? "other_revenue" : "other_expense";
+  const expectedLabel = type === "income" ? "其他收入" : "其他支出";
+  const category = options.find((option) => option.id === expectedId || option.label === expectedLabel) || null;
+  if (!category) return null;
+  return {
+    type,
+    categoryId: category.id,
+    categoryLabel: category.label,
+    item,
+    department: category.department || "",
+  };
+}
+
 export function parseDailyCashQuickEntry({ transcript, vendors = [], categories = {}, entryType = "expense" }) {
   const cleanTranscript = String(transcript || "").trim();
   const amountResult = extractTrailingAmount(cleanTranscript);
-  const targetType = entryType === "income" ? "income" : "expense";
   const rawKeyword = amountResult.keyword;
+  const explicitOtherMatch = rawKeyword.match(/^其他\s*(支出|收入)\s*(.*)$/);
+  const explicitOtherType = explicitOtherMatch?.[1] === "收入" ? "income" : explicitOtherMatch?.[1] === "支出" ? "expense" : "";
+  const targetType = explicitOtherType || (entryType === "income" ? "income" : "expense");
+
+  if (explicitOtherType) {
+    const otherItem = String(explicitOtherMatch?.[2] || "").trim();
+    if (!otherItem || !amountResult.amount) {
+      return {
+        transcript: cleanTranscript,
+        keyword: otherItem,
+        amount: amountResult.amount,
+        status: !otherItem ? "missing_keyword" : "missing_amount",
+        rule: null,
+        candidates: [],
+      };
+    }
+
+    const otherRule = getOtherEntryRule(categories, targetType, otherItem);
+    if (!otherRule) {
+      return {
+        transcript: cleanTranscript,
+        keyword: otherItem,
+        amount: amountResult.amount,
+        status: targetType === "income" ? "missing_other_income_category" : "missing_other_expense_category",
+        rule: null,
+        candidates: [],
+      };
+    }
+
+    return {
+      transcript: cleanTranscript,
+      keyword: otherItem,
+      amount: amountResult.amount,
+      status: targetType === "income" ? "matched_other_income" : "matched_other_expense",
+      rule: otherRule,
+      candidates: [],
+    };
+  }
+
   const keyword = rawKeyword.replace(targetType === "income" ? /^(收入|收款|入帳)\s*/ : /^(支出|付款|出帳)\s*/, "").trim() || rawKeyword;
 
   if (!keyword || !amountResult.amount) {
