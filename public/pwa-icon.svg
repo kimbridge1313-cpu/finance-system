@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="財務系統">
+  <rect width="512" height="512" rx="120" fill="#06C755"/>
+  <rect x="92" y="128" width="328" height="256" rx="56" fill="#ffffff"/>
+  <rect x="118" y="168" width="276" height="42" rx="21" fill="#06C755" opacity="0.16"/>
+  <path d="M170 274h172" stroke="#06C755" stroke-width="34" stroke-linecap="round"/>
+  <path d="M256 226v100" stroke="#06C755" stroke-width="34" stroke-linecap="round"/>
+  <circle cx="360" cy="330" r="24" fill="#06C755"/>
+</svg>

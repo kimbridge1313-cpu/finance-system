@@ -1,0 +1,26 @@
+{
+  "id": "/",
+  "name": "企業財務系統",
+  "short_name": "財務系統",
+  "description": "企業每日記帳、月結貨款、固定支出與損益報表",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F5F7F6",
+  "theme_color": "#06C755",
+  "lang": "zh-Hant-TW",
+  "icons": [
+    {
+      "src": "/pwa-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}
