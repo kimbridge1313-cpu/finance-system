@@ -1,0 +1,35 @@
+name: Rework daily voice review flow
+on:
+  push:
+    branches: [agent/daily-cash-voice-review-flow-impl]
+    paths:
+      - '.github/scripts/rework_daily_voice_review.py'
+      - '.github/workflows/rework-daily-voice-review.yml'
+permissions:
+  contents: write
+jobs:
+  patch-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/daily-cash-voice-review-flow-impl
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Patch source
+        run: python .github/scripts/rework_daily_voice_review.py
+      - name: Install dependencies
+        run: npm install
+      - name: Build
+        run: npm run build
+      - name: Remove temporary patch files
+        run: rm .github/scripts/rework_daily_voice_review.py .github/workflows/rework-daily-voice-review.yml
+      - name: Commit changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Rework daily voice entry into review flow'
+          git push origin HEAD:agent/daily-cash-voice-review-flow-impl
