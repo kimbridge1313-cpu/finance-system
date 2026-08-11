@@ -165,7 +165,19 @@ function getCategoryOptions(categories, type) {
 }
 
 function normalizeItems(items = []) {
-  return items.map((item) => typeof item === "string" ? { label: item, department: "" } : { label: item?.label || "", department: item?.department || "" });
+  return items.map((item) => {
+    if (typeof item === "string") return { label: item, department: "", voiceAliases: [] };
+    const voiceAliases = Array.isArray(item?.voiceAliases)
+      ? item.voiceAliases
+      : typeof item?.voiceAliases === "string"
+        ? item.voiceAliases.split(/[\n,，、]/)
+        : [];
+    return {
+      label: item?.label || "",
+      department: item?.department || "",
+      voiceAliases: voiceAliases.map((value) => String(value || "").trim()).filter(Boolean),
+    };
+  });
 }
 
 function findAccountingItem(keyword, categories) {
@@ -176,7 +188,8 @@ function findAccountingItem(keyword, categories) {
   ["expense", "income"].forEach((type) => {
     getCategoryOptions(categories, type).forEach((category) => {
       normalizeItems(category.items || []).forEach((item) => {
-        const score = scoreLookupTerm(query, normalizeLookupText(item.label));
+        const terms = [item.label, ...(item.voiceAliases || [])].map(normalizeLookupText).filter(Boolean);
+        const score = terms.reduce((best, term) => Math.max(best, scoreLookupTerm(query, term)), 0);
         if (score > 0) scored.push({
           score,
           rule: {
