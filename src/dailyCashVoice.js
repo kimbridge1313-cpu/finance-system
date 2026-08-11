@@ -180,12 +180,12 @@ function normalizeItems(items = []) {
   });
 }
 
-function findAccountingItem(keyword, categories) {
+function findAccountingItem(keyword, categories, entryType = "") {
   const query = normalizeLookupText(keyword);
   if (!query) return { rule: null, candidates: [] };
 
   const scored = [];
-  ["expense", "income"].forEach((type) => {
+  (entryType ? [entryType] : ["expense", "income"]).forEach((type) => {
     getCategoryOptions(categories, type).forEach((category) => {
       normalizeItems(category.items || []).forEach((item) => {
         const terms = [item.label, ...(item.voiceAliases || [])].map(normalizeLookupText).filter(Boolean);
@@ -226,10 +226,12 @@ function getCashPurchaseRule(categories) {
   };
 }
 
-export function parseDailyCashQuickEntry({ transcript, vendors = [], categories = {} }) {
+export function parseDailyCashQuickEntry({ transcript, vendors = [], categories = {}, entryType = "expense" }) {
   const cleanTranscript = String(transcript || "").trim();
   const amountResult = extractTrailingAmount(cleanTranscript);
-  const keyword = amountResult.keyword;
+  const targetType = entryType === "income" ? "income" : "expense";
+  const rawKeyword = amountResult.keyword;
+  const keyword = rawKeyword.replace(targetType === "income" ? /^(收入|收款|入帳)\s*/ : /^(支出|付款|出帳)\s*/, "").trim() || rawKeyword;
 
   if (!keyword || !amountResult.amount) {
     return {
@@ -242,38 +244,40 @@ export function parseDailyCashQuickEntry({ transcript, vendors = [], categories 
     };
   }
 
-  const cashVendors = vendors.filter((vendor) => vendor.type === "cash");
-  const vendorResult = findVendor(keyword, cashVendors);
-  if (vendorResult.vendor) {
-    const baseRule = getCashPurchaseRule(categories);
-    if (!baseRule) return { transcript: cleanTranscript, keyword, amount: amountResult.amount, status: "missing_cash_purchase_category", rule: null, candidates: [] };
-    return {
-      transcript: cleanTranscript,
-      keyword,
-      amount: amountResult.amount,
-      status: "matched_vendor",
-      rule: {
-        ...baseRule,
-        vendorId: vendorResult.vendor.id,
-        vendorName: vendorResult.vendor.vendorName,
-        department: vendorResult.vendor.department || baseRule.department,
-      },
-      candidates: [],
-    };
+  if (targetType === "expense") {
+    const cashVendors = vendors.filter((vendor) => vendor.type === "cash");
+    const vendorResult = findVendor(keyword, cashVendors);
+    if (vendorResult.vendor) {
+      const baseRule = getCashPurchaseRule(categories);
+      if (!baseRule) return { transcript: cleanTranscript, keyword, amount: amountResult.amount, status: "missing_cash_purchase_category", rule: null, candidates: [] };
+      return {
+        transcript: cleanTranscript,
+        keyword,
+        amount: amountResult.amount,
+        status: "matched_vendor",
+        rule: {
+          ...baseRule,
+          vendorId: vendorResult.vendor.id,
+          vendorName: vendorResult.vendor.vendorName,
+          department: vendorResult.vendor.department || baseRule.department,
+        },
+        candidates: [],
+      };
+    }
+
+    if (vendorResult.candidates.length) {
+      return {
+        transcript: cleanTranscript,
+        keyword,
+        amount: amountResult.amount,
+        status: "ambiguous_vendor",
+        rule: null,
+        candidates: vendorResult.candidates.map((vendor) => ({ kind: "vendor", vendor })),
+      };
+    }
   }
 
-  if (vendorResult.candidates.length) {
-    return {
-      transcript: cleanTranscript,
-      keyword,
-      amount: amountResult.amount,
-      status: "ambiguous_vendor",
-      rule: null,
-      candidates: vendorResult.candidates.map((vendor) => ({ kind: "vendor", vendor })),
-    };
-  }
-
-  const itemResult = findAccountingItem(keyword, categories);
+  const itemResult = findAccountingItem(keyword, categories, targetType);
   if (itemResult.rule) {
     return {
       transcript: cleanTranscript,
