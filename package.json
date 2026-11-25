@@ -6,7 +6,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@line/liff": "^2.24.0",
+    "@line/liff": "2.32.0",
     "@vitejs/plugin-react": "^4.3.4",
     "firebase": "^11.1.0",
     "firebase-admin": "^13.0.2",
